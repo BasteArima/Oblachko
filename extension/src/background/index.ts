@@ -57,7 +57,7 @@ async function translate(req: TranslateRequest): Promise<TranslateResponse> {
 
   let resp: Response;
   try {
-    resp = await fetch(`${serverUrl}/translate`, { method: 'POST', body: form });
+    resp = await serverFetch(`${serverUrl}/translate`, { method: 'POST', body: form });
   } catch {
     throw new Error(`Сервер Oblachko не отвечает (${serverUrl}). Он запущен?`);
   }
@@ -67,6 +67,24 @@ async function translate(req: TranslateRequest): Promise<TranslateResponse> {
     throw new Error(`Сервер: ${resp.status} ${detail ?? ''}`.trim());
   }
   return { ok: true, result: await resp.json() };
+}
+
+/** Delays before retrying a request to the local server that failed at the network level. */
+const SERVER_RETRY_MS = [500, 1500, 4000];
+
+/**
+ * fetch() to the local server that rides out short outages (server restarting, a busy moment):
+ * network errors are retried, HTTP errors are returned as they are.
+ */
+async function serverFetch(url: string, init?: RequestInit, retryMs: number[] = SERVER_RETRY_MS): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fetch(url, init);
+    } catch (err) {
+      if (attempt >= retryMs.length) throw err;
+      await new Promise((resolve) => setTimeout(resolve, retryMs[attempt]));
+    }
+  }
 }
 
 async function fetchImage(url: string, pageUrl: string): Promise<Blob> {
@@ -151,7 +169,9 @@ async function health(): Promise<HealthResponse> {
   const { serverUrl } = await loadSettings();
   let result: HealthResponse;
   try {
-    const resp = await fetch(`${serverUrl}/health`, { signal: AbortSignal.timeout(5000) });
+    // Generous timeout: a PC busy with OCR and the LLM can be slow to answer. One retry only, so the
+    // popup doesn't hang when the server really is off
+    const resp = await serverFetch(`${serverUrl}/health`, { signal: AbortSignal.timeout(10000) }, [500]);
     result = resp.ok ? await resp.json() : { ok: false, error: `HTTP ${resp.status}` };
   } catch {
     return { ok: false, error: `Сервер не отвечает (${serverUrl})` };

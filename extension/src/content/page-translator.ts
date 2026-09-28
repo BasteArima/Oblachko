@@ -17,6 +17,8 @@ const RESCAN_MS = 1000;
 const SVG_SRC = /^data:image\/svg|\.svg([?#]|$)/i;
 /** Key of a tainted canvas: its content can't be read, so it's translated once. */
 const OPAQUE_CANVAS = 'canvas:opaque';
+/** Failed pages near the screen are sent again after these delays (the last one repeats). */
+const RETRY_DELAYS_MS = [5_000, 15_000, 30_000, 60_000, 120_000, 300_000];
 
 interface PageState {
   key: string;
@@ -28,6 +30,9 @@ interface PageState {
   priority: number;
   view: PageView;
   capturing?: boolean;
+  /** Failed attempts so far and when to try again: a server restart or hiccup heals by itself */
+  failures?: number;
+  retryAt?: number;
 }
 
 export class PageTranslator {
@@ -172,6 +177,13 @@ export class PageTranslator {
       this.request(el, key, priority);
     } else if (state.status === 'capture') {
       void this.capture(el, state);
+    } else if (state.status === 'error' && state.retryAt !== undefined && Date.now() >= state.retryAt) {
+      state.status = 'pending';
+      state.priority = priority;
+      state.retryAt = undefined;
+      state.view.setPending();
+      this.reportStatus();
+      void this.send(el, state, priority);
     } else if (state.status === 'pending' && priority < state.priority) {
       // Scrolled into view while waiting in the prefetch queue: the server bumps the queued job
       state.priority = priority;
@@ -277,7 +289,10 @@ export class PageTranslator {
       logResult(response.result);
     } else {
       state.status = 'error';
-      state.view.setError(response.error);
+      state.failures = (state.failures ?? 0) + 1;
+      const delay = RETRY_DELAYS_MS[Math.min(state.failures, RETRY_DELAYS_MS.length) - 1];
+      state.retryAt = Date.now() + delay;
+      state.view.setError(`${response.error} (повтор через ${Math.round(delay / 1000)} с)`);
       console.warn('[Oblachko]', response.error);
     }
     this.reportStatus(response.ok ? undefined : response.error);

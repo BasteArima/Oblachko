@@ -93,6 +93,15 @@ class Worker:
                 result = self._process(job)
                 self.cache.put(job.key, result)
                 job.future.set_result(result)
+                t = result["timings"]
+                log.info(
+                    "page: %d blocks in %.1fs (ocr %.1fs, llm %.1fs), %d more queued",
+                    len(result["blocks"]),
+                    sum(t.values()),
+                    t.get("ocr", 0) + t.get("page_ocr", 0),
+                    t.get("translate", 0),
+                    self.pending - 1,  # this job leaves _jobs in the finally below
+                )
             except Exception as exc:  # noqa: BLE001 - the error goes back to the HTTP caller
                 log.exception("page failed")
                 job.future.set_exception(exc)
