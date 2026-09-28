@@ -36,11 +36,20 @@ export interface TranslateRequest {
   contextKey: string;
   /** 0 = on screen, 1 = near the viewport, 2 = hidden preloaded page */
   priority: number;
+  /** Sent as Referer when downloading a url image: many CDNs refuse hotlinks without it */
+  pageUrl: string;
 }
 
 export interface HealthRequest {
   type: 'health';
 }
+
+/** Screenshot of the visible part of the sender's tab. */
+export interface CaptureRequest {
+  type: 'capture';
+}
+
+export type CaptureResponse = { ok: true; dataUrl: string } | { ok: false; error: string };
 
 export interface StatusMessage {
   type: 'status';
@@ -48,9 +57,12 @@ export interface StatusMessage {
   errors: number;
 }
 
-export type Message = TranslateRequest | HealthRequest | StatusMessage;
+export type Message = TranslateRequest | HealthRequest | CaptureRequest | StatusMessage;
 
-export type TranslateResponse = { ok: true; result: PageResult } | { ok: false; error: string };
+export type TranslateResponse =
+  | { ok: true; result: PageResult }
+  /** code 'fetch': the image could not be downloaded, the page should fall back to a screenshot */
+  | { ok: false; error: string; code?: 'fetch' };
 
 export interface HealthResponse {
   ok: boolean;

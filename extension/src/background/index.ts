@@ -3,14 +3,24 @@
  * Content scripts can't reach http://127.0.0.1 from an https page and can't read cross-origin
  * images; the service worker can, thanks to host_permissions.
  */
-import type { HealthResponse, Message, TranslateRequest, TranslateResponse } from '../shared/messages';
+import type { CaptureResponse, HealthResponse, Message, TranslateRequest, TranslateResponse } from '../shared/messages';
 import { loadSettings } from '../shared/settings';
+
+/** chrome.tabs.captureVisibleTab allows 2 calls per second. */
+const CAPTURE_INTERVAL_MS = 550;
+
+class FetchError extends Error {}
 
 chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
   switch (msg.type) {
     case 'translate':
-      translate(msg).then(sendResponse, (err: unknown) => sendResponse({ ok: false, error: errorText(err) }));
+      translate(msg).then(sendResponse, (err: unknown) =>
+        sendResponse({ ok: false, error: errorText(err), code: err instanceof FetchError ? 'fetch' : undefined }),
+      );
       return true; // async response
+    case 'capture':
+      capture(sender).then(sendResponse, (err: unknown) => sendResponse({ ok: false, error: errorText(err) }));
+      return true;
     case 'health':
       health().then(sendResponse);
       return true;
@@ -22,7 +32,7 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
 
 async function translate(req: TranslateRequest): Promise<TranslateResponse> {
   const { serverUrl } = await loadSettings();
-  const image = req.image.kind === 'url' ? await fetchImage(req.image.url) : base64ToBlob(req.image.base64, req.image.mime);
+  const image = req.image.kind === 'url' ? await fetchImage(req.image.url, req.pageUrl) : base64ToBlob(req.image.base64, req.image.mime);
 
   const form = new FormData();
   form.append('image', image, 'page');
@@ -43,10 +53,75 @@ async function translate(req: TranslateRequest): Promise<TranslateResponse> {
   return { ok: true, result: await resp.json() };
 }
 
-async function fetchImage(url: string): Promise<Blob> {
-  const resp = await fetch(url, { credentials: 'include' });
-  if (!resp.ok) throw new Error(`Не удалось скачать картинку: ${resp.status}`);
-  return resp.blob();
+async function fetchImage(url: string, pageUrl: string): Promise<Blob> {
+  await setReferer(url, pageUrl);
+  let resp: Response;
+  try {
+    resp = await fetch(url, { credentials: 'include' });
+  } catch {
+    throw new FetchError('Не удалось скачать картинку');
+  }
+  if (!resp.ok) throw new FetchError(`Не удалось скачать картинку: HTTP ${resp.status}`);
+  const blob = await resp.blob();
+  // Anti-hotlink setups answer 200 with an HTML page or a tiny placeholder
+  if (blob.type.startsWith('text/') || blob.size < 2048) throw new FetchError('CDN отдал не картинку');
+  return blob;
+}
+
+const refererByHost = new Map<string, string>();
+
+/**
+ * fetch() can't set Referer, and without it many image CDNs refuse the download. A session rule
+ * sets it for requests to that host that come from no tab, i.e. from this service worker only.
+ */
+async function setReferer(url: string, pageUrl: string): Promise<void> {
+  const host = new URL(url).hostname;
+  const referer = pageUrl.split('#')[0];
+  if (refererByHost.get(host) === referer) return;
+  const id = ruleId(host);
+  await chrome.declarativeNetRequest.updateSessionRules({
+    removeRuleIds: [id],
+    addRules: [
+      {
+        id,
+        priority: 1,
+        action: {
+          type: chrome.declarativeNetRequest.RuleActionType.MODIFY_HEADERS,
+          requestHeaders: [{ header: 'referer', operation: chrome.declarativeNetRequest.HeaderOperation.SET, value: referer }],
+        },
+        condition: {
+          requestDomains: [host],
+          tabIds: [chrome.tabs.TAB_ID_NONE],
+          resourceTypes: [chrome.declarativeNetRequest.ResourceType.XMLHTTPREQUEST],
+        },
+      },
+    ],
+  });
+  refererByHost.set(host, referer);
+}
+
+function ruleId(host: string): number {
+  let hash = 0;
+  for (const ch of host) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  return (hash % 1_000_000) + 1;
+}
+
+let captureQueue: Promise<unknown> = Promise.resolve();
+let lastCapture = 0;
+
+/** Screenshots are rate-limited by Chrome, so they queue up here. */
+function capture(sender: chrome.runtime.MessageSender): Promise<CaptureResponse> {
+  const job = captureQueue.then(async (): Promise<CaptureResponse> => {
+    const tab = sender.tab;
+    if (!tab?.active) return { ok: false, error: 'Вкладка не активна' };
+    const wait = lastCapture + CAPTURE_INTERVAL_MS - Date.now();
+    if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+    lastCapture = Date.now();
+    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+    return { ok: true, dataUrl };
+  });
+  captureQueue = job.catch(() => {});
+  return job;
 }
 
 function base64ToBlob(base64: string, mime: string): Blob {

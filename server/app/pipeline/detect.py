@@ -15,6 +15,11 @@ import onnxruntime as ort
 
 MODEL_FILE = "comictextdetector.pt.onnx"
 INPUT_SIZE = 1024
+# Images taller than TILE_TRIGGER x width (webtoon strips) are detected in tiles of
+# TILE_HEIGHT x width, overlapping by TILE_OVERLAP x width
+TILE_TRIGGER = 2.2
+TILE_HEIGHT = 1.5
+TILE_OVERLAP = 0.35
 # YOLO class ids of the detector. Unreliable as a language signal (English bubbles often come out
 # as "ja"), the pipeline decides the language from OCR output instead.
 CLASS_LANGS = ("en", "ja", "unknown")
@@ -64,6 +69,27 @@ class TextDetector:
     def __call__(self, img_bgr: np.ndarray) -> tuple[list[DetectedBlock], np.ndarray]:
         """Returns text blocks and a uint8 text mask, both in original image coordinates."""
         h, w = img_bgr.shape[:2]
+        if h <= TILE_TRIGGER * w:
+            return self._detect(img_bgr)
+
+        # Webtoon strip: squeezed into 1024x1024 whole, its text would be a few pixels tall.
+        # Run on overlapping square-ish tiles; every bubble lies wholly inside at least one tile.
+        tile_h, overlap = int(w * TILE_HEIGHT), int(w * TILE_OVERLAP)
+        mask = np.zeros((h, w), np.uint8)
+        blocks: list[DetectedBlock] = []
+        y0 = 0
+        while True:
+            y1 = min(h, y0 + tile_h)
+            tile_blocks, tile_mask = self._detect(img_bgr[y0:y1])
+            np.maximum(mask[y0:y1], tile_mask, out=mask[y0:y1])
+            blocks += [DetectedBlock(b.x1, b.y1 + y0, b.x2, b.y2 + y0, b.conf, b.lang) for b in tile_blocks]
+            if y1 == h:
+                break
+            y0 = y1 - overlap
+        return _drop_contained(blocks), mask
+
+    def _detect(self, img_bgr: np.ndarray) -> tuple[list[DetectedBlock], np.ndarray]:
+        h, w = img_bgr.shape[:2]
         ratio = min(INPUT_SIZE / h, INPUT_SIZE / w)
         new_w, new_h = round(w * ratio), round(h * ratio)
         # Letterbox: resized image in the top-left corner, padding bottom/right (same as the original repo)
@@ -107,3 +133,20 @@ class TextDetector:
             lang = CLASS_LANGS[cls_ids[i]] if cls_ids[i] < len(CLASS_LANGS) else "unknown"
             blocks.append(DetectedBlock(x1, y1, x2, y2, float(confs[i]), lang))
         return blocks
+
+
+def _drop_contained(blocks: list[DetectedBlock], ratio: float = 0.6) -> list[DetectedBlock]:
+    """Tiles overlap, so a bubble shows up whole in one tile and cut in the next.
+    Keep the larger block when most of a smaller one lies inside it."""
+    blocks = sorted(blocks, key=lambda b: b.w * b.h, reverse=True)
+    kept: list[DetectedBlock] = []
+    for b in blocks:
+        area = b.w * b.h
+        for k in kept:
+            iw = min(b.x2, k.x2) - max(b.x1, k.x1)
+            ih = min(b.y2, k.y2) - max(b.y1, k.y1)
+            if iw > 0 and ih > 0 and iw * ih >= ratio * area:
+                break
+        else:
+            kept.append(b)
+    return kept

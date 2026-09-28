@@ -7,6 +7,7 @@
  * pixels, so zoom, resize and scrolling never need a re-fit.
  */
 import type { PageResult } from '../shared/messages';
+import { contentRect, type PageElement } from './geometry';
 
 const STYLE = `
 .layer { position: fixed; inset: 0; pointer-events: none; }
@@ -54,6 +55,8 @@ const MIN_FONT = 0.011;
 const MAX_FONT = 0.031;
 /** Font size cap from the box width: room for about this many average Cyrillic letters per line. */
 const CHARS_PER_LINE = 4.5;
+/** Height / width of a typical manga page. */
+const PAGE_ASPECT = 1.45;
 
 export class Overlay {
   private readonly host: HTMLElement;
@@ -83,16 +86,21 @@ export class Overlay {
     this.timer = window.setInterval(this.schedule, 500);
   }
 
-  attach(img: HTMLImageElement): PageView {
-    const view = new PageView(img, this.layer, () => {
+  attach(el: PageElement): PageView {
+    const view = new PageView(el, this.layer, () => {
       this.views.delete(view);
-      this.resizeObserver.unobserve(img);
+      this.resizeObserver.unobserve(el);
     });
     this.views.add(view);
-    this.resizeObserver.observe(img);
+    this.resizeObserver.observe(el);
     this.schedule();
     return view;
   }
+
+  /** Hide everything for a moment, e.g. while the tab is being screenshotted. */
+  setHidden = (hidden: boolean): void => {
+    this.host.style.visibility = hidden ? 'hidden' : '';
+  };
 
   destroy(): void {
     removeEventListener('scroll', this.schedule, { capture: true });
@@ -132,7 +140,7 @@ export class PageView {
   private needsFit = false;
 
   constructor(
-    private readonly img: HTMLImageElement,
+    private readonly source: PageElement,
     layer: HTMLElement,
     private readonly onRemove: () => void,
   ) {
@@ -153,6 +161,13 @@ export class PageView {
     this.badge.className = 'badge error';
     this.badge.textContent = '!';
     this.badge.title = `Oblachko: ${message}`;
+  }
+
+  /** The page can only be screenshotted once it's fully on screen. */
+  setWaitingForView(): void {
+    this.badge.className = 'badge';
+    this.badge.textContent = 'Покажите страницу целиком';
+    this.badge.removeAttribute('title');
   }
 
   render(result: PageResult): void {
@@ -195,11 +210,11 @@ export class PageView {
   }
 
   update(): void {
-    if (!this.img.isConnected) {
+    if (!this.source.isConnected) {
       this.remove();
       return;
     }
-    const rect = contentRect(this.img);
+    const rect = contentRect(this.source);
     const visible =
       rect.width > 1 && rect.height > 1 && rect.bottom > 0 && rect.top < innerHeight && rect.right > 0 && rect.left < innerWidth;
     this.el.style.display = visible ? '' : 'none';
@@ -219,7 +234,8 @@ export class PageView {
   }
 
   private fitAll(): void {
-    const pageH = this.result!.height;
+    // Font limits scale with a normal page's height; a webtoon strip is many pages tall
+    const pageH = Math.min(this.result!.height, this.result!.width * PAGE_ASPECT);
     for (const el of this.stage.querySelectorAll<HTMLElement>('.text')) {
       // Narrow tall bubbles (vertical Japanese) would otherwise take one huge word per line
       const maxByWidth = Number(el.dataset.w) / CHARS_PER_LINE;
@@ -244,23 +260,4 @@ function fitText(el: HTMLElement, boxH: number, minSize: number, maxSize: number
     }
   }
   el.style.fontSize = `${best}px`;
-}
-
-/** On-screen rect of the image content, honouring object-fit: contain (readers use it to fit the viewport). */
-function contentRect(img: HTMLImageElement): DOMRect {
-  const rect = img.getBoundingClientRect();
-  if (rect.width === 0 || rect.bottom < -innerHeight || rect.top > 2 * innerHeight) return rect;
-  const style = getComputedStyle(img);
-  const left = rect.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft);
-  const top = rect.top + parseFloat(style.borderTopWidth) + parseFloat(style.paddingTop);
-  const width = rect.width - parseFloat(style.borderLeftWidth) - parseFloat(style.borderRightWidth) - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
-  const height = rect.height - parseFloat(style.borderTopWidth) - parseFloat(style.borderBottomWidth) - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
-
-  if ((style.objectFit === 'contain' || style.objectFit === 'scale-down') && img.naturalWidth && img.naturalHeight) {
-    const scale = Math.min(width / img.naturalWidth, height / img.naturalHeight, style.objectFit === 'scale-down' ? 1 : Infinity);
-    const w = img.naturalWidth * scale;
-    const h = img.naturalHeight * scale;
-    return new DOMRect(left + (width - w) / 2, top + (height - h) / 2, w, h);
-  }
-  return new DOMRect(left, top, width, height);
 }
