@@ -19,6 +19,12 @@ INNER_RATIO = 0.85
 # Percent of the bubble's pixels ignored on each side when measuring it (cuts off the tail)
 TAIL_CUT = 2
 BG_TOLERANCE = 40
+# Opening kernel relative to the text box's larger side: cuts tails and gaps into the background
+OPEN_RATIO = 0.12
+# Share of its bounding box a real bubble fills (an ellipse fills ~0.79)
+MIN_FILL = 0.55
+# How far the text centre may sit from the bubble centre, as a share of the bubble size
+MAX_OFFSET = 0.15
 
 
 def find_bubble(
@@ -40,6 +46,11 @@ def find_bubble(
     text[by1:by2, bx1:bx2] = mask[y1:y2, x1:x2] > 127
     text = cv2.dilate(text.astype(np.uint8), _KERNEL, iterations=2) > 0
     region = (bg_like | text).astype(np.uint8)
+    # Bubbles are often not closed: the tail opens into a white background, or the outline touches
+    # a white shirt. Opening with a kernel scaled to the text cuts such narrow bridges while the
+    # bubble body, much wider than the kernel, survives.
+    k = max(5, int(max(x2 - x1, y2 - y1) * OPEN_RATIO)) | 1
+    region = cv2.morphologyEx(region, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
 
     n, labels, stats, _ = cv2.connectedComponentsWithStats(region, connectivity=4)
     if n <= 1:
@@ -59,7 +70,14 @@ def find_bubble(
     ys, xs = np.nonzero(labels == label)
     px1, px2 = np.percentile(xs, [TAIL_CUT, 100 - TAIL_CUT])
     py1, py2 = np.percentile(ys, [TAIL_CUT, 100 - TAIL_CUT])
-    cw, ch = px2 - px1, py2 - py1
+    cw, ch = max(px2 - px1, 1.0), max(py2 - py1, 1.0)
+
+    # A bubble is a compact blob with the text near its middle. A ragged region, or text off in
+    # a corner of it, means the fill escaped into the background: don't trust it
+    fill = len(xs) / (cw * ch)
+    offset = max(abs((bx1 + bx2) / 2 - (px1 + cw / 2)) / cw, abs((by1 + by2) / 2 - (py1 + ch / 2)) / ch)
+    if fill < MIN_FILL or offset > MAX_OFFSET:
+        return x1, y1, x2 - x1, y2 - y1
 
     # Inner rectangle of the bubble, but never smaller than the original text box
     iw, ih = cw * INNER_RATIO, ch * INNER_RATIO

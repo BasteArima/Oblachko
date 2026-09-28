@@ -26,6 +26,10 @@ _WATERMARK_RE = re.compile(r"^[\w\-]+\.(com|net|org|se|to|zone|io|me|info|site|x
 _PUNCT_ONLY_RE = re.compile(r"^[\s!?！？.。．…‥・\-ー~〜～、,]+$")
 
 OCR_PAD = 6
+# A neighbouring block overlapping less than this share of its own area is a separate text
+NEIGHBOUR_INSIDE = 0.6
+# Trimming a bubble area off a neighbour's text keeps at least this share of the block's own text box
+KEEP_OWN_TEXT = 0.6
 # Page-wide OCR lines below this recognition score are mostly logos and texture ("ODBV" on a T-shirt)
 PAGE_OCR_MIN_SCORE = 0.9
 
@@ -111,7 +115,7 @@ class Pipeline:
         read: list[tuple[DetectedBlock, str, str]] = []
         seen = {"ja": 0, "en": 0}
         for b in detected:
-            crop = img_rgb[max(0, b.y1 - OCR_PAD) : b.y2 + OCR_PAD, max(0, b.x1 - OCR_PAD) : b.x2 + OCR_PAD]
+            crop = _ocr_crop(img_rgb, b, detected)
             if lang == "auto":
                 block_lang, text = self._ocr_auto(crop, first="en" if seen["en"] > seen["ja"] else "ja")
             else:
@@ -136,6 +140,7 @@ class Pipeline:
             area = find_bubble(img_rgb, mask, b.x1, b.y1, b.x2, b.y2, bg)
             vertical = block_lang == "ja" and b.h > b.w
             blocks.append(Block(len(blocks), (b.x1, b.y1, b.w, b.h), area, block_lang, vertical, bg, fg, text, text))
+        _keep_areas_apart(blocks)
 
         t = time.perf_counter()
         lines = [blk.src for blk in blocks]
@@ -227,6 +232,68 @@ class Pipeline:
         for b, block_lang, _ in read:
             area[block_lang] += b.w * b.h
         return "ja" if area["ja"] >= area["en"] else "en"
+
+
+def _keep_areas_apart(blocks: list[Block]) -> None:
+    """A bubble area grown past its bubble must not cover another block's text: trim it on the
+    side that costs the least, never inside its own text box. Overlapping bubbles (one drawn over
+    the other) otherwise get their translations stacked on top of each other."""
+    for a in blocks:
+        ax, ay, aw, ah = a.bbox
+        x1, y1, x2, y2 = ax, ay, ax + aw, ay + ah
+        tx1, ty1, tx2, ty2 = a.text_bbox[0], a.text_bbox[1], a.text_bbox[0] + a.text_bbox[2], a.text_bbox[1] + a.text_bbox[3]
+        for o in blocks:
+            if o is a:
+                continue
+            ox1, oy1, ox2, oy2 = o.text_bbox[0], o.text_bbox[1], o.text_bbox[0] + o.text_bbox[2], o.text_bbox[1] + o.text_bbox[3]
+            if min(x2, ox2) <= max(x1, ox1) or min(y2, oy2) <= max(y1, oy1):
+                continue
+            # Candidate cuts that clear the other text. When the text boxes themselves overlap
+            # (detector boxes of touching bubbles), a cut may enter our own text box, but must
+            # leave most of it: the overlap is the neighbour's letters, not ours.
+            min_w, min_h = (tx2 - tx1) * KEEP_OWN_TEXT, (ty2 - ty1) * KEEP_OWN_TEXT
+            cuts = []
+            if ox1 >= tx1 + min_w and ox2 >= tx2:
+                cuts.append((x2 - ox1, "right", ox1))
+            if ox2 <= tx2 - min_w and ox1 <= tx1:
+                cuts.append((ox2 - x1, "left", ox2))
+            if oy1 >= ty1 + min_h and oy2 >= ty2:
+                cuts.append((y2 - oy1, "bottom", oy1))
+            if oy2 <= ty2 - min_h and oy1 <= ty1:
+                cuts.append((oy2 - y1, "top", oy2))
+            if not cuts:
+                continue
+            _, side, at = min(cuts)
+            if side == "right":
+                x2 = at
+            elif side == "left":
+                x1 = at
+            elif side == "bottom":
+                y2 = at
+            else:
+                y1 = at
+        a.bbox = (x1, y1, x2 - x1, y2 - y1)
+
+
+def _ocr_crop(img_rgb: np.ndarray, b: DetectedBlock, detected: list[DetectedBlock]) -> np.ndarray:
+    """The block's pixels for OCR, with neighbouring blocks that reach into it painted over.
+    Detector boxes of adjacent bubbles overlap, and OCR would otherwise read pieces of the
+    neighbour's text into this one ("IWATO-KUN" + "GO DOUBLE-CHECK" -> "1WA GO KU DOUBLECHECK")."""
+    cx1, cy1 = max(0, b.x1 - OCR_PAD), max(0, b.y1 - OCR_PAD)
+    crop = img_rgb[cy1 : b.y2 + OCR_PAD, cx1 : b.x2 + OCR_PAD].copy()
+    paper = np.percentile(crop.reshape(-1, 3), 90, axis=0).astype(np.uint8)  # the bubble's own colour
+    for o in detected:
+        # Only smaller neighbours: the pieces of text in the overlap belong to the small bubble,
+        # so blanking a bigger neighbour would erase this block's own letters
+        if o is b or o.w * o.h >= b.w * b.h:
+            continue
+        ix1, iy1, ix2, iy2 = max(o.x1, cx1), max(o.y1, cy1), min(o.x2, b.x2 + OCR_PAD), min(o.y2, b.y2 + OCR_PAD)
+        if ix2 <= ix1 or iy2 <= iy1:
+            continue
+        # Only neighbours that mostly lie outside: a block nested inside this one is part of its text
+        if (ix2 - ix1) * (iy2 - iy1) < NEIGHBOUR_INSIDE * o.w * o.h:
+            crop[iy1 - cy1 : iy2 - cy1, ix1 - cx1 : ix2 - cx1] = paper
+    return crop
 
 
 _SENTENCE_START_RE = re.compile(r"(^|[.!?…]\s+|^[-—]\s*)(\w)")

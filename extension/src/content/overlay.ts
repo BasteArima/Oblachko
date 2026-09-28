@@ -181,6 +181,10 @@ export class PageView {
     this.stage.style.width = `${result.width}px`;
     this.stage.style.height = `${result.height}px`;
 
+    // All covers go below all texts: covers of neighbouring bubbles can overlap, and a later
+    // block's cover would otherwise paint over an earlier block's translation
+    const covers: HTMLElement[] = [];
+    const texts: HTMLElement[] = [];
     for (const block of result.blocks) {
       const [tx, ty, tw, th] = block.text_bbox;
       const cover = document.createElement('div');
@@ -202,8 +206,10 @@ export class PageView {
       text.style.setProperty('--bg', block.bg);
       text.dataset.w = String(w);
       text.dataset.h = String(h);
-      this.stage.append(cover, text);
+      covers.push(cover);
+      texts.push(text);
     }
+    this.stage.append(...covers, ...texts);
     this.needsFit = true;
     this.update();
   }
