@@ -9,23 +9,40 @@
     <header>
       <img src="/icons/icon32.png" alt="" width="20" height="20" />
       <h1>Oblachko</h1>
-      <span id="status-dot" class="dot" title="Статус сервера"></span>
+      <button type="button" id="recheck" class="icon-button" title="Проверить сервер и модель снова">↻</button>
     </header>
 
-    <p id="status" class="status">Проверяю сервер…</p>
-    <div id="tab-error" class="tab-error" hidden>
-      <span id="tab-error-text"></span>
-      <button type="button" id="retry">Повторить</button>
-    </div>
-    <p id="version-hint" class="tab-error" hidden></p>
+    <!-- Server and model: each with its own light, problem, hint and a retry -->
+    <section class="card" id="health">
+      <div class="check">
+        <span id="server-dot" class="dot"></span>
+        <span class="check-name">Сервер</span>
+        <span id="server-text" class="check-value">Проверяю…</span>
+      </div>
+      <div class="check">
+        <span id="llm-dot" class="dot"></span>
+        <span class="check-name">Модель</span>
+        <span id="llm-text" class="check-value">—</span>
+      </div>
+      <div id="health-problem" class="problem" hidden>
+        <b id="health-title"></b>
+        <span id="health-hint"></span>
+        <details id="health-details" class="raw">
+          <summary>Подробности</summary>
+          <code id="health-raw"></code>
+        </details>
+        <button type="button" id="health-retry" class="primary">Проверить снова</button>
+      </div>
+      <p id="version-hint" class="problem" hidden></p>
+    </section>
 
-    <section id="site-section">
+    <section id="site-section" class="card">
       <label class="toggle">
         <input id="enabled" type="checkbox" />
         <span>Переводить на <b id="host">этом сайте</b></span>
       </label>
 
-      <label class="field">
+      <label class="inline-field">
         <span>Язык оригинала</span>
         <select id="lang">
           <option value="auto">Определять сам</option>
@@ -34,12 +51,36 @@
         </select>
       </label>
 
-      <p class="hint">Зажмите <kbd>Alt</kbd>, чтобы увидеть оригинал.</p>
+      <div id="page-controls" hidden>
+        <div class="progress" id="progress">
+          <span class="stat"><b id="stat-done">0</b> готово</span>
+          <span class="stat"><b id="stat-pending">0</b> в работе</span>
+          <span class="stat bad" id="stat-errors-wrap"><b id="stat-errors">0</b> с ошибкой</span>
+        </div>
+        <p id="stat-waiting" class="hint" hidden>Некоторые страницы сайт не отдаёт: прокрутите, чтобы страница была видна целиком.</p>
+
+        <div id="tab-problem" class="problem" hidden>
+          <b id="tab-title"></b>
+          <span id="tab-hint"></span>
+          <details class="raw">
+            <summary>Подробности</summary>
+            <code id="tab-raw"></code>
+          </details>
+        </div>
+
+        <div class="actions">
+          <button type="button" id="retry-errors" class="primary" hidden>Повторить ошибки</button>
+          <button type="button" id="retranslate" title="Перевести все страницы ещё раз, не беря готовый перевод из кэша">Перевести заново</button>
+          <button type="button" id="original" aria-pressed="false" title="Скрыть перевод (как зажатый Alt)">Оригинал</button>
+        </div>
+      </div>
+      <p id="reload-hint" class="hint" hidden>Обновите вкладку (F5), чтобы расширение заработало на ней.</p>
+      <p class="hint"><kbd>Alt</kbd> — подсмотреть оригинал, «Ошибка ↻» на странице — повторить её.</p>
     </section>
 
-    <p id="unsupported" class="hint" hidden>На этой странице расширение не работает.</p>
+    <p id="unsupported" class="hint card" hidden>На этой странице расширение не работает.</p>
 
-    <details id="glossary" hidden>
+    <details id="glossary" class="fold" hidden>
       <summary>Имена в этом тайтле <span id="glossary-count" class="count"></span></summary>
       <p class="hint">Переводчик запоминает имена сам. Исправьте неудачные, и страницы переведутся заново.</p>
       <form id="glossary-form">
@@ -47,13 +88,13 @@
         <div class="row">
           <button type="button" id="glossary-add">+ Имя</button>
           <span class="spacer"></span>
-          <button type="submit" id="glossary-save">Сохранить</button>
+          <button type="submit" id="glossary-save" class="primary">Сохранить</button>
         </div>
         <p id="glossary-status" class="hint"></p>
       </form>
     </details>
 
-    <details>
+    <details class="fold">
       <summary>Сервер</summary>
       <form id="server-form" class="field">
         <span>Адрес локального сервера</span>

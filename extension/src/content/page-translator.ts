@@ -33,6 +33,8 @@ interface PageState {
   /** Failed attempts so far and when to try again: a server restart or hiccup heals by itself */
   failures?: number;
   retryAt?: number;
+  /** Translate anew instead of taking the server's cached result ("Перевести заново") */
+  fresh?: boolean;
 }
 
 export class PageTranslator {
@@ -51,6 +53,8 @@ export class PageTranslator {
   /** Elements whose style/class changed: checked for a background image in one batch. */
   private readonly styleChanged = new Set<HTMLElement>();
   private styleTimer = 0;
+  /** Pages to translate anew once they come into range (the ones far away aren't requested yet). */
+  private freshPages = new WeakSet<PageElement>();
 
   constructor(private readonly lang: Lang) {
     this.mutations.observe(document.documentElement, {
@@ -76,15 +80,46 @@ export class PageTranslator {
     this.reportStatus();
   }
 
-  /** Drop every translation (not the ones in flight) and translate again: after the glossary changed or to retry errors. */
-  retranslate(): void {
+  /**
+   * Drop every translation (not the ones in flight) and translate again: after the glossary changed
+   * (the server's cache already tells the names apart), or with fresh = true when the user asks for
+   * another translation, bypassing the server's cache.
+   */
+  retranslate(fresh = false): void {
     for (const [el, state] of this.pages) {
       if (state.status === 'pending' || state.capturing) continue;
       state.view.remove();
       this.pages.delete(el);
     }
+    this.freshPages = new WeakSet();
+    if (fresh) this.all().forEach((el) => this.freshPages.add(el));
     this.reportStatus();
     this.all().forEach((el) => this.check(el));
+  }
+
+  /** Failed pages are sent again now instead of waiting for their automatic retry. */
+  retryErrors(): void {
+    for (const [el, state] of this.pages) {
+      if (state.status === 'error') this.retry(el, state);
+    }
+  }
+
+  setOriginal(on: boolean): void {
+    this.overlay.setOriginal(on);
+  }
+
+  get showingOriginal(): boolean {
+    return this.overlay.showingOriginal;
+  }
+
+  private retry(el: PageElement, state: PageState): void {
+    if (this.pages.get(el) !== state || state.status !== 'error') return;
+    state.status = 'pending';
+    state.priority = priorityOf(el) ?? 1;
+    state.retryAt = undefined;
+    state.view.setPending();
+    this.reportStatus();
+    void this.send(el, state, state.priority);
   }
 
   private all(): PageElement[] {
@@ -178,12 +213,7 @@ export class PageTranslator {
     } else if (state.status === 'capture') {
       void this.capture(el, state);
     } else if (state.status === 'error' && state.retryAt !== undefined && Date.now() >= state.retryAt) {
-      state.status = 'pending';
-      state.priority = priority;
-      state.retryAt = undefined;
-      state.view.setPending();
-      this.reportStatus();
-      void this.send(el, state, priority);
+      this.retry(el, state);
     } else if (state.status === 'pending' && priority < state.priority) {
       // Scrolled into view while waiting in the prefetch queue: the server bumps the queued job
       state.priority = priority;
@@ -203,7 +233,8 @@ export class PageTranslator {
   }
 
   private request(el: PageElement, key: string, priority: number): void {
-    const state: PageState = { key, status: 'pending', priority, view: this.overlay.attach(el) };
+    const state: PageState = { key, status: 'pending', priority, view: this.overlay.attach(el), fresh: this.freshPages.has(el) };
+    this.freshPages.delete(el);
     this.pages.set(el, state);
     this.reportStatus();
     void this.send(el, state, priority);
@@ -218,7 +249,7 @@ export class PageTranslator {
     }
     if (payload === null) return this.needCapture(el, state);
 
-    const response = await this.translate(payload, priority);
+    const response = await this.translate(payload, priority, state.fresh);
     if (!response.ok && response.code === 'fetch') return this.needCapture(el, state);
     this.finish(el, state, response);
   }
@@ -243,7 +274,7 @@ export class PageTranslator {
       const payload = await capturePixels(el, this.overlay.setHidden);
       // On screen already and nothing to bump: keeps check() from re-reading the unreadable pixels
       state.priority = 0;
-      response = await this.translate(payload, 0);
+      response = await this.translate(payload, 0, state.fresh);
     } catch (err) {
       if (err instanceof NotVisibleError) {
         state.view.setWaitingForView();
@@ -257,10 +288,11 @@ export class PageTranslator {
     this.finish(el, state, response);
   }
 
-  private async translate(image: ImagePayload, priority: number): Promise<TranslateResponse> {
+  private async translate(image: ImagePayload, priority: number, fresh = false): Promise<TranslateResponse> {
     const request: TranslateRequest = {
       type: 'translate',
       image,
+      fresh,
       lang: this.lang,
       contextKey: chapterKey(),
       titleKey: titleKey(),
@@ -285,6 +317,7 @@ export class PageTranslator {
     }
     if (response.ok) {
       state.status = 'done';
+      state.fresh = false;
       state.view.render(response.result);
       logResult(response.result);
     } else {
@@ -292,7 +325,7 @@ export class PageTranslator {
       state.failures = (state.failures ?? 0) + 1;
       const delay = RETRY_DELAYS_MS[Math.min(state.failures, RETRY_DELAYS_MS.length) - 1];
       state.retryAt = Date.now() + delay;
-      state.view.setError(`${response.error} (повтор через ${Math.round(delay / 1000)} с)`);
+      state.view.setError(`${response.error} (сам повторю через ${Math.round(delay / 1000)} с)`, () => this.retry(el, state));
       console.warn('[Oblachko]', response.error);
     }
     this.reportStatus(response.ok ? undefined : response.error);
@@ -301,11 +334,15 @@ export class PageTranslator {
   private reportStatus(lastError?: string): void {
     let pending = 0;
     let errors = 0;
+    let done = 0;
+    let waiting = 0;
     for (const state of this.pages.values()) {
       if (state.status === 'pending') pending++;
       else if (state.status === 'error') errors++;
+      else if (state.status === 'done') done++;
+      else if (state.status === 'capture') waiting++;
     }
-    const status: StatusMessage = { type: 'status', pending, errors, lastError };
+    const status: StatusMessage = { type: 'status', pending, errors, done, waiting, lastError };
     chrome.runtime.sendMessage(status).catch(() => {});
   }
 }

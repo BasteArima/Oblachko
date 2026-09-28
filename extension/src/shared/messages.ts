@@ -43,6 +43,8 @@ export interface TranslateRequest {
   priority: number;
   /** Sent as Referer when downloading a url image: many CDNs refuse hotlinks without it */
   pageUrl: string;
+  /** Translate again even if the server has this page cached */
+  fresh?: boolean;
 }
 
 export interface HealthRequest {
@@ -61,6 +63,10 @@ export interface StatusMessage {
   type: 'status';
   pending: number;
   errors: number;
+  /** Pages translated */
+  done?: number;
+  /** Pages that can only be screenshotted and aren't fully on screen */
+  waiting?: number;
   lastError?: string;
 }
 
@@ -73,10 +79,18 @@ export interface TabStatusRequest {
 export type TabStatus = Omit<StatusMessage, 'type'>;
 
 /** Popup -> content script of the active tab. */
-export type PopupToPage = { type: 'page-info' } | { type: 'retranslate' };
+export type PopupToPage =
+  | { type: 'page-info' }
+  /** fresh: bypass the server's cache (the user wants another translation) */
+  | { type: 'retranslate'; fresh?: boolean }
+  | { type: 'retry-errors' }
+  | { type: 'set-original'; on: boolean };
 
 export interface PageInfo {
   titleKey: string;
+  /** Translation switched on for this site (a content script without a translator answers too) */
+  active: boolean;
+  showingOriginal: boolean;
 }
 
 export type Message = TranslateRequest | HealthRequest | CaptureRequest | StatusMessage | TabStatusRequest;

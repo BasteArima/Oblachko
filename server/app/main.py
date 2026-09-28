@@ -1,6 +1,7 @@
 """HTTP API for the extension.
 
-POST /translate  multipart: image (file), lang (auto|ja|en), context_key (chapter), title_key, priority (0 = on screen)
+POST /translate  multipart: image (file), lang (auto|ja|en), context_key (chapter), title_key, priority (0 = on screen),
+                 fresh (1 = translate again, ignoring the cache)
 GET  /health     server, model and queue status
 GET  /glossary?title=...  names known for a title
 PUT  /glossary   {"title": ..., "entries": [{"src": ..., "dst": ...}]}  replace with the user's edits
@@ -75,6 +76,7 @@ async def translate(
     context_key: str = Form(""),
     title_key: str = Form(""),
     priority: int = Form(1),
+    fresh: bool = Form(False),
 ) -> dict:
     if lang not in LANGS:
         raise HTTPException(400, f"lang must be one of {sorted(LANGS)}")
@@ -89,7 +91,7 @@ async def translate(
 
     worker: Worker = state["worker"]
     try:
-        future, cached = worker.submit(data, lang, context_key, title_key, priority)
+        future, cached = worker.submit(data, lang, context_key, title_key, priority, fresh)
         result = await asyncio.wrap_future(future)
     except httpx.HTTPError as exc:
         raise HTTPException(503, f"LLM request failed: {exc}") from exc

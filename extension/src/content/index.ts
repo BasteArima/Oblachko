@@ -22,10 +22,23 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 chrome.runtime.onMessage.addListener((msg: PopupToPage, _sender, sendResponse: (info: PageInfo) => void) => {
-  // The popup asks which title is open to show its name glossary
-  if (msg.type === 'page-info') sendResponse({ titleKey: titleKey() });
-  // ...and asks to redo the pages after the glossary changed, or to retry failed ones
-  else if (msg.type === 'retranslate') active?.translator.retranslate();
+  const translator = active?.translator;
+  switch (msg.type) {
+    // The popup asks which title is open (name glossary) and what the page shows
+    case 'page-info':
+      sendResponse({ titleKey: titleKey(), active: !!translator, showingOriginal: translator?.showingOriginal ?? false });
+      break;
+    // Redo the pages after the glossary changed, or on "Перевести заново"
+    case 'retranslate':
+      translator?.retranslate(msg.fresh);
+      break;
+    case 'retry-errors':
+      translator?.retryErrors();
+      break;
+    case 'set-original':
+      translator?.setOriginal(msg.on);
+      break;
+  }
   return false;
 });
 

@@ -63,10 +63,13 @@ class Worker:
         names = self.glossary.manual_hash(title_key) if title_key else "-"
         return f"{digest}|{lang}|{self.pipeline.translator.resolve_model()}|{PROMPT_VERSION}|{names}"
 
-    def submit(self, image: bytes, lang: str, context_key: str, title_key: str, priority: int) -> tuple[Future, bool]:
-        """Returns (future with the result, whether it came from the cache)."""
+    def submit(
+        self, image: bytes, lang: str, context_key: str, title_key: str, priority: int, fresh: bool = False
+    ) -> tuple[Future, bool]:
+        """Returns (future with the result, whether it came from the cache).
+        fresh: translate again even if cached; the new result replaces the cached one."""
         key = self.cache_key(image, lang, title_key)
-        cached = self.cache.get(key)
+        cached = None if fresh else self.cache.get(key)
         if cached is not None:
             done: Future = Future()
             done.set_result(cached)

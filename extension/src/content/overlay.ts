@@ -13,7 +13,7 @@ const STYLE = `
 .layer { position: fixed; inset: 0; pointer-events: none; }
 .page { position: absolute; left: 0; top: 0; overflow: hidden; }
 .stage { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
-.layer.peek .stage { display: none; }
+.layer.peek .stage, .layer.original .stage { display: none; }
 .cover { position: absolute; border-radius: 6px; }
 .text {
   position: absolute;
@@ -54,7 +54,8 @@ const STYLE = `
   background: rgba(91, 110, 225, 0.9);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
 }
-.badge.error { background: rgba(217, 48, 37, 0.92); pointer-events: auto; cursor: help; }
+.badge.error { background: rgba(217, 48, 37, 0.92); pointer-events: auto; cursor: pointer; }
+.badge.error:hover { background: rgb(190, 30, 20); }
 .badge.pending::after { content: '…'; animation: blink 1s steps(2) infinite; }
 @keyframes blink { 50% { opacity: 0.3; } }
 `;
@@ -110,6 +111,15 @@ export class Overlay {
     return view;
   }
 
+  /** Show the originals until switched back (the popup's "Оригинал"), like holding Alt. */
+  setOriginal(on: boolean): void {
+    this.layer.classList.toggle('original', on);
+  }
+
+  get showingOriginal(): boolean {
+    return this.layer.classList.contains('original');
+  }
+
   /** Hide everything for a moment, e.g. while the tab is being screenshotted. */
   setHidden = (hidden: boolean): void => {
     this.host.style.visibility = hidden ? 'hidden' : '';
@@ -151,6 +161,7 @@ export class PageView {
   private readonly badge = document.createElement('div');
   private result: PageResult | null = null;
   private needsFit = false;
+  private onRetry: (() => void) | null = null;
 
   constructor(
     private readonly source: PageElement,
@@ -161,23 +172,36 @@ export class PageView {
     this.stage.className = 'stage';
     this.el.append(this.stage, this.badge);
     layer.append(this.el);
+    this.badge.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation(); // readers flip the page on a click
+      this.onRetry?.();
+    });
     this.setPending();
   }
 
   setPending(): void {
+    this.onRetry = null;
+    this.badge.hidden = false;
     this.badge.className = 'badge pending';
     this.badge.textContent = 'Перевод';
     this.badge.removeAttribute('title');
   }
 
-  setError(message: string): void {
+  /** A click on the badge retries the page right away. */
+  setError(message: string, onRetry: () => void): void {
+    this.onRetry = onRetry;
+    this.badge.hidden = false;
     this.badge.className = 'badge error';
-    this.badge.textContent = '!';
-    this.badge.title = `Oblachko: ${message}`;
+    this.badge.textContent = 'Ошибка ↻';
+    this.badge.title = `Oblachko: ${message}
+Нажмите, чтобы повторить сейчас.`;
   }
 
   /** The page can only be screenshotted once it's fully on screen. */
   setWaitingForView(): void {
+    this.onRetry = null;
+    this.badge.hidden = false;
     this.badge.className = 'badge';
     this.badge.textContent = 'Покажите страницу целиком';
     this.badge.removeAttribute('title');

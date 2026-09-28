@@ -34,7 +34,7 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
         const previous = tabStatus.get(sender.tab.id);
         // Keep the last error until the tab has no errors left, so the popup can explain the red badge
         const lastError = msg.lastError ?? (msg.errors > 0 ? previous?.lastError : undefined);
-        tabStatus.set(sender.tab.id, { pending: msg.pending, errors: msg.errors, lastError });
+        tabStatus.set(sender.tab.id, { pending: msg.pending, errors: msg.errors, done: msg.done, waiting: msg.waiting, lastError });
         setBadge(sender.tab.id, msg.pending, msg.errors);
       }
       return false;
@@ -54,6 +54,7 @@ async function translate(req: TranslateRequest): Promise<TranslateResponse> {
   form.append('context_key', req.contextKey);
   form.append('title_key', req.titleKey);
   form.append('priority', String(req.priority));
+  if (req.fresh) form.append('fresh', '1');
 
   let resp: Response;
   try {
