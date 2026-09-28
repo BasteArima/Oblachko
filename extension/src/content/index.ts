@@ -1,4 +1,4 @@
-import type { PageInfo, PageInfoRequest } from '../shared/messages';
+import type { PageInfo, PopupToPage } from '../shared/messages';
 import { siteKey, siteSettings, type Lang } from '../shared/settings';
 import { PageTranslator } from './page-translator';
 import { titleKey } from './title';
@@ -21,9 +21,11 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'sync' && changes.sites) void sync();
 });
 
-// The popup asks which title is open to show its name glossary
-chrome.runtime.onMessage.addListener((msg: PageInfoRequest, _sender, sendResponse: (info: PageInfo) => void) => {
+chrome.runtime.onMessage.addListener((msg: PopupToPage, _sender, sendResponse: (info: PageInfo) => void) => {
+  // The popup asks which title is open to show its name glossary
   if (msg.type === 'page-info') sendResponse({ titleKey: titleKey() });
+  // ...and asks to redo the pages after the glossary changed, or to retry failed ones
+  else if (msg.type === 'retranslate') active?.translator.retranslate();
   return false;
 });
 

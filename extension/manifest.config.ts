@@ -1,5 +1,8 @@
+import { readFileSync } from 'node:fs';
 import { defineManifest } from '@crxjs/vite-plugin';
-import pkg from './package.json' with { type: 'json' };
+
+/** One version for the server, the extension and the release archive. */
+const version = readFileSync(new URL('../VERSION', import.meta.url), 'utf8').trim();
 
 const icons = {
   16: 'icons/icon16.png',
@@ -11,7 +14,7 @@ const icons = {
 export default defineManifest({
   manifest_version: 3,
   name: 'Oblachko',
-  version: pkg.version,
+  version,
   description: 'Переводит мангу прямо на странице с помощью локальной нейросети',
   icons,
   action: {

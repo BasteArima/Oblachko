@@ -1,5 +1,6 @@
-import type { GlossaryEntry, HealthResponse, PageInfo, TabStatus } from '../shared/messages';
+import type { GlossaryEntry, HealthResponse, PageInfo, PopupToPage, TabStatus } from '../shared/messages';
 import { loadSettings, siteKey, siteSettings, updateServerUrl, updateSite, type Lang } from '../shared/settings';
+import { compareVersions } from '../shared/version';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -57,28 +58,47 @@ async function checkHealth(): Promise<void> {
     const queue = health.queue ? ` · в очереди ${health.queue}` : '';
     statusEl.textContent = `Готов · ${health.llm.model} · ${gpu}${queue}`;
   }
+
+  // The service worker reloads itself after an update; if it's still older, it was loaded from another folder
+  const own = chrome.runtime.getManifest().version;
+  if (health.version && compareVersions(health.version, own) > 0) {
+    const hint = $<HTMLParagraphElement>('version-hint');
+    hint.textContent = `Сервер обновлён до ${health.version}, а расширение ещё ${own}. Откройте chrome://extensions и нажмите ↻ у Oblachko (расширение должно быть загружено из папки extension рядом с start.bat).`;
+    hint.hidden = false;
+  }
 }
 
 async function showTabError(tabId: number): Promise<void> {
   const status: TabStatus = await chrome.runtime.sendMessage({ type: 'tab-status', tabId });
   if (!status.lastError) return;
-  const el = $<HTMLParagraphElement>('tab-error');
-  el.textContent = `Ошибок на странице: ${status.errors}. Последняя: ${status.lastError}`;
-  el.hidden = false;
+  $('tab-error-text').textContent = `Ошибок на странице: ${status.errors}. Последняя: ${status.lastError}`;
+  $('tab-error').hidden = false;
+  $('retry').addEventListener('click', () => {
+    void retranslate(tabId);
+    $('tab-error').hidden = true;
+  });
+}
+
+async function retranslate(tabId: number): Promise<void> {
+  const message: PopupToPage = { type: 'retranslate' };
+  await chrome.tabs.sendMessage(tabId, message).catch(() => {});
 }
 
 // --- Name glossary of the title open in the tab ---
 
 let glossaryTitle = '';
+let glossaryTab = -1;
 
 async function initGlossary(tabId: number): Promise<void> {
   let info: PageInfo;
   try {
-    info = await chrome.tabs.sendMessage(tabId, { type: 'page-info' });
+    const message: PopupToPage = { type: 'page-info' };
+    info = await chrome.tabs.sendMessage(tabId, message);
   } catch {
     return; // no content script: page opened before the extension was installed or reloaded
   }
   glossaryTitle = info.titleKey;
+  glossaryTab = tabId;
   $('glossary').hidden = false;
   $('glossary-add').addEventListener('click', () => addRow({ src: '', dst: '' }, true).querySelector('input')!.focus());
   $<HTMLFormElement>('glossary-form').addEventListener('submit', (e) => {
@@ -138,7 +158,8 @@ async function saveGlossary(): Promise<void> {
     .filter((e) => e.src && e.dst);
   try {
     renderGlossary(await glossaryRequest('PUT', entries));
-    glossaryStatus.textContent = 'Сохранено. Обновите страницу, чтобы перевести её с новыми именами.';
+    await retranslate(glossaryTab);
+    glossaryStatus.textContent = 'Сохранено. Страница переводится заново с новыми именами.';
   } catch {
     glossaryStatus.textContent = 'Не удалось сохранить: сервер недоступен.';
   }

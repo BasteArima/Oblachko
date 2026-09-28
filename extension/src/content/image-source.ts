@@ -1,11 +1,12 @@
 /**
  * Getting page pixels to the service worker, cheapest way first:
- * 1. blob:/data:/same-origin <img> - read here (MangaDex pages are blob: URLs that only exist in the page)
- * 2. cross-origin <img> - the service worker downloads the URL itself, host permissions get it past CORS
+ * 1. blob:/data:/same-origin <img> or background - read here (MangaDex pages are blob: URLs that only exist in the page)
+ * 2. cross-origin <img> or background - the service worker downloads the URL itself, host permissions get it past CORS
  * 3. readable <canvas> - toBlob
  * 4. anything else (tainted canvas, CDN refusing the download) - crop from a screenshot of the tab
  */
 import type { CaptureResponse, ImagePayload } from '../shared/messages';
+import { backgroundUrl } from './background-image';
 import { contentRect, type PageElement } from './geometry';
 
 export class NotVisibleError extends Error {}
@@ -22,7 +23,9 @@ export async function readPixels(el: PageElement): Promise<ImagePayload | null> 
     return blob ? blobPayload(blob) : null;
   }
 
-  const url = new URL(el.currentSrc || el.src, location.href);
+  const src = el instanceof HTMLImageElement ? el.currentSrc || el.src : backgroundUrl(el);
+  if (!src) return null;
+  const url = new URL(src, location.href);
   if (url.protocol === 'blob:' || url.protocol === 'data:' || url.origin === location.origin) {
     return blobPayload(await (await fetch(url)).blob());
   }
@@ -64,6 +67,7 @@ export async function capturePixels(el: PageElement, setOverlayHidden: (hidden: 
  */
 export function contentKey(el: PageElement): string | null {
   if (el instanceof HTMLImageElement) return el.currentSrc || el.src || null;
+  if (!(el instanceof HTMLCanvasElement)) return backgroundUrl(el);
   try {
     const probe = document.createElement('canvas');
     probe.width = probe.height = 8;

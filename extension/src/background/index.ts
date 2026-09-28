@@ -5,6 +5,7 @@
  */
 import type { CaptureResponse, HealthResponse, Message, TabStatus, TranslateRequest, TranslateResponse } from '../shared/messages';
 import { loadSettings } from '../shared/settings';
+import { compareVersions } from '../shared/version';
 
 /** chrome.tabs.captureVisibleTab allows 2 calls per second. */
 const CAPTURE_INTERVAL_MS = 550;
@@ -147,14 +148,34 @@ function base64ToBlob(base64: string, mime: string): Blob {
 
 async function health(): Promise<HealthResponse> {
   const { serverUrl } = await loadSettings();
+  let result: HealthResponse;
   try {
     const resp = await fetch(`${serverUrl}/health`, { signal: AbortSignal.timeout(5000) });
-    if (!resp.ok) return { ok: false, error: `HTTP ${resp.status}` };
-    return await resp.json();
+    result = resp.ok ? await resp.json() : { ok: false, error: `HTTP ${resp.status}` };
   } catch {
     return { ok: false, error: `Сервер не отвечает (${serverUrl})` };
   }
+  if (result.version) await reloadIfOutdated(result.version);
+  return result;
 }
+
+/**
+ * The updater (start.bat) replaces the unpacked extension's files on disk together with the server;
+ * Chrome only picks them up on reload. When the server is newer, reload once for that version:
+ * if the files didn't change (extension loaded from another folder), the popup explains instead.
+ */
+async function reloadIfOutdated(serverVersion: string): Promise<void> {
+  if (compareVersions(serverVersion, chrome.runtime.getManifest().version) <= 0) return;
+  const self = await chrome.management.getSelf();
+  if (self.installType !== 'development') return;
+  const { reloadedFor } = await chrome.storage.local.get('reloadedFor');
+  if (reloadedFor === serverVersion) return;
+  await chrome.storage.local.set({ reloadedFor: serverVersion });
+  chrome.runtime.reload();
+}
+
+// Service workers start often (every page message); a cheap moment to notice an update
+void health();
 
 function setBadge(tabId: number, pending: number, errors: number): void {
   const text = pending > 0 ? String(pending) : errors > 0 ? '!' : '';

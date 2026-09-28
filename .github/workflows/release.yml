@@ -1,0 +1,39 @@
+# Push a tag matching VERSION (git tag v0.2.0 && git push origin v0.2.0) to publish a release.
+# start.bat on users' machines picks it up on the next launch.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: extension/package-lock.json
+
+      - name: Build extension
+        working-directory: extension
+        run: |
+          npm ci
+          npm run build
+
+      - name: Package
+        run: python3 tools/package.py --tag "$GITHUB_REF_NAME"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/Oblachko-*.zip \
+            --title "Oblachko $GITHUB_REF_NAME" \
+            --generate-notes

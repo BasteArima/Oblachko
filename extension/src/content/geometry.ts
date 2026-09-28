@@ -1,21 +1,45 @@
-/** Page images come as <img> or, in some readers, as a <canvas> the page draws into. */
-export type PageElement = HTMLImageElement | HTMLCanvasElement;
+import { backgroundImage, backgroundPlacement } from './background-image';
+
+/**
+ * A manga page on screen: an <img>, a <canvas> the reader draws into, or any other element
+ * that shows the page as its CSS background-image.
+ */
+export type PageElement = HTMLElement;
 
 export function naturalSize(el: PageElement): [number, number] {
-  return el instanceof HTMLImageElement ? [el.naturalWidth, el.naturalHeight] : [el.width, el.height];
+  if (el instanceof HTMLImageElement) return [el.naturalWidth, el.naturalHeight];
+  if (el instanceof HTMLCanvasElement) return [el.width, el.height];
+  const img = backgroundImage(el);
+  return img ? [img.naturalWidth, img.naturalHeight] : [0, 0];
 }
 
-/** On-screen rect of the element's picture, honouring object-fit: contain (readers use it to fit the viewport). */
+/**
+ * On-screen rect of the element's picture: content box of an <img>/<canvas> honouring object-fit
+ * (readers use contain to fit the viewport), or the drawn area of a background image.
+ */
 export function contentRect(el: PageElement): DOMRect {
   const rect = el.getBoundingClientRect();
   if (rect.width === 0 || rect.bottom < -innerHeight || rect.top > 2 * innerHeight) return rect;
   const style = getComputedStyle(el);
-  const left = rect.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft);
-  const top = rect.top + parseFloat(style.borderTopWidth) + parseFloat(style.paddingTop);
-  const width = rect.width - parseFloat(style.borderLeftWidth) - parseFloat(style.borderRightWidth) - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
-  const height = rect.height - parseFloat(style.borderTopWidth) - parseFloat(style.borderBottomWidth) - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
-
   const [nw, nh] = naturalSize(el);
+  const border = (side: 'Left' | 'Right' | 'Top' | 'Bottom') => parseFloat(style[`border${side}Width`]);
+  const padding = (side: 'Left' | 'Right' | 'Top' | 'Bottom') => parseFloat(style[`padding${side}`]);
+
+  if (!(el instanceof HTMLImageElement) && !(el instanceof HTMLCanvasElement)) {
+    // Backgrounds are laid out in the padding box
+    const left = rect.left + border('Left');
+    const top = rect.top + border('Top');
+    const width = rect.width - border('Left') - border('Right');
+    const height = rect.height - border('Top') - border('Bottom');
+    if (!nw || !nh) return new DOMRect(left, top, width, height);
+    const drawn = backgroundPlacement(style, nw, nh, width, height);
+    return new DOMRect(left + drawn.x, top + drawn.y, drawn.width, drawn.height);
+  }
+
+  const left = rect.left + border('Left') + padding('Left');
+  const top = rect.top + border('Top') + padding('Top');
+  const width = rect.width - border('Left') - border('Right') - padding('Left') - padding('Right');
+  const height = rect.height - border('Top') - border('Bottom') - padding('Top') - padding('Bottom');
   if ((style.objectFit === 'contain' || style.objectFit === 'scale-down') && nw && nh) {
     const scale = Math.min(width / nw, height / nh, style.objectFit === 'scale-down' ? 1 : Infinity);
     const w = nw * scale;

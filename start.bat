@@ -1,8 +1,16 @@
 @echo off
-rem Oblachko server: first run sets everything up, later runs just start it.
+rem Oblachko: updates itself, sets everything up on the first run and starts the server.
 setlocal
 chcp 65001 >nul
 cd /d "%~dp0"
+
+rem The updater can't overwrite a running batch file, it leaves start.bat.new instead.
+rem The whole block is parsed before it runs, so replacing the file here is safe.
+if exist start.bat.new (
+    copy /y start.bat.new start.bat >nul
+    del start.bat.new
+    "%~f0"
+)
 
 where uv >nul 2>nul
 if errorlevel 1 (
@@ -11,6 +19,16 @@ if errorlevel 1 (
     echo и запустите start.bat ещё раз.
     goto fail
 )
+
+echo Проверяю обновления...
+uv run --no-project --python 3.12 python server\update.py
+if exist start.bat.new (
+    copy /y start.bat.new start.bat >nul
+    del start.bat.new
+    "%~f0"
+)
+
+cd server
 
 if not exist models\comictextdetector.pt.onnx (
     echo Скачиваю детектор текста, около 95 МБ...
@@ -21,7 +39,7 @@ if not exist models\comictextdetector.pt.onnx (
 
 if not exist config.toml (
     copy config.example.toml config.toml >nul
-    echo Создан config.toml. Если LM Studio слушает не порт 1234, поправьте в нём llm_base_url.
+    echo Создан server\config.toml. Если LM Studio слушает не порт 1234, поправьте в нём llm_base_url.
 )
 
 echo Проверяю зависимости. В первый раз это займёт несколько минут...

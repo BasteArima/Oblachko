@@ -21,7 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from .cache import ResultCache
-from .config import SERVER_DIR, load_settings
+from .config import SERVER_DIR, VERSION, load_settings
 from .glossary import Glossary
 from .pipeline.pipeline import Pipeline
 from .worker import Worker
@@ -49,7 +49,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="Oblachko", lifespan=lifespan)
+app = FastAPI(title="Oblachko", version=VERSION, lifespan=lifespan)
 # The extension talks to us from its service worker (host permission, no CORS needed);
 # this only matters for the popup and for debugging from extension pages
 app.add_middleware(CORSMiddleware, allow_origin_regex=r"chrome-extension://.*", allow_methods=["*"], allow_headers=["*"])
@@ -65,7 +65,7 @@ async def health() -> dict:
         llm["ok"] = True
     except (httpx.HTTPError, RuntimeError) as exc:
         llm["error"] = str(exc)
-    return {"ok": True, "device": worker.pipeline.detector.provider, "queue": worker.pending, "llm": llm}
+    return {"ok": True, "version": VERSION, "device": worker.pipeline.detector.provider, "queue": worker.pending, "llm": llm}
 
 
 @app.post("/translate")

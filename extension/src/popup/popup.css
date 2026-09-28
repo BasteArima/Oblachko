@@ -151,6 +151,9 @@ details .hint {
 }
 
 .tab-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: -6px 0 12px;
   padding: 6px 8px;
   border-radius: 6px;
@@ -158,6 +161,21 @@ details .hint {
   color: var(--bad);
   font-size: 12px;
   word-break: break-word;
+}
+
+.tab-error[hidden] {
+  display: none;
+}
+
+.tab-error span {
+  flex: 1;
+}
+
+.tab-error button {
+  flex: none;
+  padding: 2px 8px;
+  border-color: currentColor;
+  color: inherit;
 }
 
 .count {

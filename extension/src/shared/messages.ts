@@ -71,9 +71,7 @@ export interface TabStatusRequest {
 export type TabStatus = Omit<StatusMessage, 'type'>;
 
 /** Popup -> content script of the active tab. */
-export interface PageInfoRequest {
-  type: 'page-info';
-}
+export type PopupToPage = { type: 'page-info' } | { type: 'retranslate' };
 
 export interface PageInfo {
   titleKey: string;
@@ -95,6 +93,7 @@ export type TranslateResponse =
 export interface HealthResponse {
   ok: boolean;
   error?: string;
+  version?: string;
   device?: string;
   queue?: number;
   llm?: { url: string; ok: boolean; model: string | null; error?: string };

@@ -9,6 +9,8 @@ from pathlib import Path
 
 SERVER_DIR = Path(__file__).resolve().parent.parent
 CONFIG_PATH = SERVER_DIR / "config.toml"
+# One version for the server, the extension and the release archive (the repo / release root)
+VERSION = (SERVER_DIR.parent / "VERSION").read_text(encoding="utf-8").strip()
 
 
 @dataclass

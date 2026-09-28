@@ -14,6 +14,10 @@ server/config.toml
 # Test pages are copyrighted, keep them local only
 test_pages/
 
+# Release archives (tools/package.py), self-update leftovers
+/dist/
+start.bat.new
+
 # Node / extension
 node_modules/
 extension/dist/

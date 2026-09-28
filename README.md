@@ -17,7 +17,7 @@ Source languages: Japanese, English. Target: Russian.
 - The page on screen is translated first, the next pages are prefetched while you read.
 - Results are cached by image hash: re-opening a chapter is instant.
 - Pages of a chapter share context; names are kept in a per-title glossary so a character keeps one Russian name. The glossary can be edited in the popup.
-- Works with `<img>` and `<canvas>` readers, anti-hotlink CDNs (Referer is set), webtoon strips; when pixels can't be read, the page is cropped from a tab screenshot.
+- Works with `<img>`, `<canvas>` and CSS `background-image` readers, anti-hotlink CDNs (Referer is set), webtoon strips; when pixels can't be read, the page is cropped from a tab screenshot.
 
 ## 1. LM Studio
 
@@ -31,9 +31,24 @@ The server takes about 0.8 GB of VRAM (detector and OCR in fp16). Windows and Ch
 - load the model with a small context (4096 is plenty: one page is ~1000 tokens);
 - a 9B model at Q4 (~6 GB) fits; a 12B model at Q4 (~6.7 GB) needs a couple of layers offloaded to the CPU in LM Studio, which costs some speed.
 
-## 2. Server
+## For users: release archive
 
-Windows: install [uv](https://docs.astral.sh/uv/) once, then double-click `server/start.bat`. The first run downloads the text detector (~95 MB), the Python packages (a few GB, mostly PyTorch) and the OCR model (~450 MB); later runs start in seconds. If LM Studio doesn't use port 1234, set `llm_base_url` in `server/config.toml`.
+Download `Oblachko-vX.Y.Z.zip` from [Releases](https://github.com/BasteArima/Oblachko/releases), unpack it somewhere permanent and follow `ИНСТРУКЦИЯ.txt`: install [uv](https://docs.astral.sh/uv/) once, run `start.bat`, load the `extension` folder in Chrome once. Every `start.bat` launch checks for a new release and updates the server and the extension in place (settings, models and the glossary are kept); the extension notices the new version and reloads itself.
+
+## Publishing a release
+
+Bump `VERSION` (the single version of the server and the extension), commit, then push a matching tag:
+
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+GitHub Actions builds the extension and attaches the archive from `tools/package.py` to the release. To build the archive locally: `npm run build` in `extension/`, then `python tools/package.py`.
+
+## 2. Server (development)
+
+Windows: install [uv](https://docs.astral.sh/uv/) once, then run `start.bat` in the repo root (in a git checkout it skips self-update). The first run downloads the text detector (~95 MB), the Python packages (a few GB, mostly PyTorch) and the OCR model (~450 MB); later runs start in seconds. If LM Studio doesn't use port 1234, set `llm_base_url` in `server/config.toml`.
 
 Manually:
 

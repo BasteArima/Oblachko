@@ -13,7 +13,11 @@
     </header>
 
     <p id="status" class="status">Проверяю сервер…</p>
-    <p id="tab-error" class="tab-error" hidden></p>
+    <div id="tab-error" class="tab-error" hidden>
+      <span id="tab-error-text"></span>
+      <button type="button" id="retry">Повторить</button>
+    </div>
+    <p id="version-hint" class="tab-error" hidden></p>
 
     <section id="site-section">
       <label class="toggle">

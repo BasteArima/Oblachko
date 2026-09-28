@@ -4,6 +4,7 @@
  */
 import type { ImagePayload, PageResult, StatusMessage, TranslateRequest, TranslateResponse } from '../shared/messages';
 import type { Lang } from '../shared/settings';
+import { backgroundImage, backgroundUrl } from './background-image';
 import { fullyVisible, naturalSize, type PageElement } from './geometry';
 import { capturePixels, contentKey, NotVisibleError, readPixels } from './image-source';
 import { Overlay, type PageView } from './overlay';
@@ -36,10 +37,21 @@ export class PageTranslator {
   });
   private readonly mutations = new MutationObserver((records) => this.onMutations(records));
   private readonly timer: number;
+  /** Elements showing a page as their CSS background-image. */
+  private readonly backgrounds = new Set<HTMLElement>();
+  /** Elements whose style/class changed: checked for a background image in one batch. */
+  private readonly styleChanged = new Set<HTMLElement>();
+  private styleTimer = 0;
 
   constructor(private readonly lang: Lang) {
-    this.mutations.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['src', 'srcset'] });
-    this.all().forEach((el) => this.watch(el));
+    this.mutations.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['src', 'srcset', 'style', 'class'],
+    });
+    document.querySelectorAll<PageElement>('img, canvas').forEach((el) => this.watch(el));
+    this.scanBackgrounds(document.body);
     // Paged readers preload hidden pages and flip them by toggling visibility, canvas readers
     // redraw in place: neither produces anything to observe
     this.timer = window.setInterval(() => this.all().forEach((el) => this.check(el)), RESCAN_MS);
@@ -47,6 +59,7 @@ export class PageTranslator {
 
   destroy(): void {
     clearInterval(this.timer);
+    clearTimeout(this.styleTimer);
     this.intersection.disconnect();
     this.mutations.disconnect();
     this.overlay.destroy();
@@ -54,21 +67,77 @@ export class PageTranslator {
     this.reportStatus();
   }
 
-  private all(): NodeListOf<PageElement> {
-    return document.querySelectorAll<PageElement>('img, canvas');
+  /** Drop every translation (not the ones in flight) and translate again: after the glossary changed or to retry errors. */
+  retranslate(): void {
+    for (const [el, state] of this.pages) {
+      if (state.status === 'pending' || state.capturing) continue;
+      state.view.remove();
+      this.pages.delete(el);
+    }
+    this.reportStatus();
+    this.all().forEach((el) => this.check(el));
+  }
+
+  private all(): PageElement[] {
+    for (const el of this.backgrounds) if (!el.isConnected) this.backgrounds.delete(el);
+    return [...document.querySelectorAll<PageElement>('img, canvas'), ...this.backgrounds];
   }
 
   private onMutations(records: MutationRecord[]): void {
     for (const record of records) {
       if (record.type === 'attributes') {
         if (record.target instanceof HTMLImageElement) this.check(record.target);
+        else if (record.target instanceof HTMLElement && record.attributeName !== 'src' && record.attributeName !== 'srcset') {
+          this.styleChanged.add(record.target);
+        }
         continue;
       }
       for (const node of record.addedNodes) {
         if (node instanceof HTMLImageElement || node instanceof HTMLCanvasElement) this.watch(node);
-        else if (node instanceof Element) node.querySelectorAll<PageElement>('img, canvas').forEach((el) => this.watch(el));
+        else if (node instanceof HTMLElement) {
+          node.querySelectorAll<PageElement>('img, canvas').forEach((el) => this.watch(el));
+          this.scanBackgrounds(node);
+        }
       }
     }
+    // Readers toggle classes constantly; computed styles are read in one batch instead of per mutation
+    if (this.styleChanged.size && !this.styleTimer) {
+      this.styleTimer = window.setTimeout(() => {
+        this.styleTimer = 0;
+        this.styleChanged.forEach((el) => this.considerBackground(el));
+        this.styleChanged.clear();
+      }, 200);
+    }
+  }
+
+  private scanBackgrounds(root: HTMLElement): void {
+    this.considerBackground(root);
+    root.querySelectorAll<HTMLElement>('*').forEach((el) => this.considerBackground(el));
+  }
+
+  private considerBackground(el: HTMLElement): void {
+    if (el instanceof HTMLImageElement || el instanceof HTMLCanvasElement) return;
+    if (el === document.body || el === document.documentElement || el.tagName === 'OBLACHKO-OVERLAY') return;
+    if (this.backgrounds.has(el)) {
+      this.check(el);
+    } else if (backgroundUrl(el)) {
+      this.backgrounds.add(el);
+      this.watch(el);
+    }
+  }
+
+  private isPage(el: PageElement): boolean {
+    if (el instanceof HTMLImageElement) {
+      if (!el.complete) return false;
+    } else if (!(el instanceof HTMLCanvasElement) && !backgroundImage(el, () => this.check(el))) {
+      return false; // background still loading (or gone): check again on load
+    }
+    const [w, h] = naturalSize(el);
+    if (w < MIN_SIDE || h < MIN_SIDE) return false;
+    if (el instanceof HTMLImageElement) return true;
+    // Canvases also serve effects and charts, backgrounds decorate headers: a page is big on screen
+    const rect = el.getBoundingClientRect();
+    return rect.width >= MIN_SIDE / 2 && rect.height >= MIN_SIDE / 2;
   }
 
   private watch(el: PageElement): void {
@@ -80,7 +149,7 @@ export class PageTranslator {
   }
 
   private check(el: PageElement): void {
-    if (!isPage(el)) return;
+    if (!this.isPage(el)) return;
     const key = this.stableKey(el);
     if (key === null) return;
 
@@ -215,17 +284,6 @@ export class PageTranslator {
   }
 }
 
-function isPage(el: PageElement): boolean {
-  if (el instanceof HTMLImageElement && !el.complete) return false;
-  const [w, h] = naturalSize(el);
-  if (w < MIN_SIDE || h < MIN_SIDE) return false;
-  // Canvases are also used for effects and charts; a reader's canvas is big on screen
-  if (el instanceof HTMLCanvasElement) {
-    const rect = el.getBoundingClientRect();
-    return rect.width >= MIN_SIDE / 2 && rect.height >= MIN_SIDE / 2;
-  }
-  return true;
-}
 
 function priorityOf(el: PageElement): number | null {
   const rect = el.getBoundingClientRect();
