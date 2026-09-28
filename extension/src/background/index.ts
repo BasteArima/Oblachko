@@ -61,6 +61,7 @@ async function translate(req: TranslateRequest): Promise<TranslateResponse> {
   } catch {
     throw new Error(`Сервер Oblachko не отвечает (${serverUrl}). Он запущен?`);
   }
+  if (resp.status === 415) return { ok: false, code: 'skip', error: 'не картинка страницы' };
   if (!resp.ok) {
     const detail = await resp.json().then((j: { detail?: string }) => j.detail, () => resp.statusText);
     throw new Error(`Сервер: ${resp.status} ${detail ?? ''}`.trim());

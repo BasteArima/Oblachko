@@ -14,13 +14,17 @@ import { chapterKey, titleKey } from './title';
 const MIN_SIDE = 300;
 const PREFETCH_SCREENS = 1.5;
 const RESCAN_MS = 1000;
+const SVG_SRC = /^data:image\/svg|\.svg([?#]|$)/i;
 /** Key of a tainted canvas: its content can't be read, so it's translated once. */
 const OPAQUE_CANVAS = 'canvas:opaque';
 
 interface PageState {
   key: string;
-  /** 'capture': pixels unreadable, waiting until the page is fully on screen to screenshot it */
-  status: 'pending' | 'capture' | 'done' | 'error';
+  /**
+   * 'capture': pixels unreadable, waiting until the page is fully on screen to screenshot it;
+   * 'skipped': not a page after all (the server couldn't read it as an image), nothing is shown
+   */
+  status: 'pending' | 'capture' | 'done' | 'error' | 'skipped';
   priority: number;
   view: PageView;
   capturing?: boolean;
@@ -128,7 +132,8 @@ export class PageTranslator {
 
   private isPage(el: PageElement): boolean {
     if (el instanceof HTMLImageElement) {
-      if (!el.complete) return false;
+      // SVG logos and icons can be large, but they are never manga pages
+      if (!el.complete || SVG_SRC.test(el.currentSrc || el.src)) return false;
     } else if (!(el instanceof HTMLCanvasElement) && !backgroundImage(el, () => this.check(el))) {
       return false; // background still loading (or gone): check again on load
     }
@@ -260,6 +265,12 @@ export class PageTranslator {
   private finish(el: PageElement, state: PageState, response: TranslateResponse): void {
     // Page changed or already answered by an earlier (lower priority) request
     if (this.pages.get(el) !== state || state.status !== 'pending') return;
+    if (!response.ok && response.code === 'skip') {
+      state.status = 'skipped';
+      state.view.remove();
+      this.reportStatus();
+      return;
+    }
     if (response.ok) {
       state.status = 'done';
       state.view.render(response.result);

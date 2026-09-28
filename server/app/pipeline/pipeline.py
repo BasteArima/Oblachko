@@ -41,6 +41,16 @@ class Block:
     dst: str
 
 
+def is_raster_image(data: bytes) -> bool:
+    """Cheap header check before queueing: pages sometimes turn out to be SVG logos or HTML error pages."""
+    try:
+        with Image.open(io.BytesIO(data)) as im:
+            im.verify()
+        return True
+    except Exception:  # noqa: BLE001 - Pillow raises a zoo of types for garbage input
+        return False
+
+
 def decode_image(data: bytes) -> np.ndarray:
     """RGB uint8 array. Pillow sniffs the format, so octet-stream CDNs and WebP are fine."""
     with Image.open(io.BytesIO(data)) as im:

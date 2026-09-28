@@ -23,7 +23,7 @@ from pydantic import BaseModel
 from .cache import ResultCache
 from .config import SERVER_DIR, VERSION, load_settings
 from .glossary import Glossary
-from .pipeline.pipeline import Pipeline
+from .pipeline.pipeline import Pipeline, is_raster_image
 from .worker import Worker
 
 log = logging.getLogger("oblachko")
@@ -83,6 +83,9 @@ async def translate(
         raise HTTPException(400, "empty image")
     if len(data) > MAX_IMAGE_BYTES:
         raise HTTPException(413, "image too large")
+    if not is_raster_image(data):
+        # 415 tells the extension this element isn't a page at all: it skips it quietly
+        raise HTTPException(415, "not a raster image")
 
     worker: Worker = state["worker"]
     try:

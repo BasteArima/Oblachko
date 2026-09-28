@@ -87,8 +87,11 @@ export interface GlossaryEntry {
 
 export type TranslateResponse =
   | { ok: true; result: PageResult }
-  /** code 'fetch': the image could not be downloaded, the page should fall back to a screenshot */
-  | { ok: false; error: string; code?: 'fetch' };
+  /**
+   * code 'fetch': the image could not be downloaded, the page should fall back to a screenshot;
+   * code 'skip': the server says it isn't a raster image (SVG logo, HTML error page): ignore quietly
+   */
+  | { ok: false; error: string; code?: 'fetch' | 'skip' };
 
 export interface HealthResponse {
   ok: boolean;
