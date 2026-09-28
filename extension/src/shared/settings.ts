@@ -40,37 +40,3 @@ export async function updateSite(host: string, patch: Partial<SiteSettings>): Pr
 export async function updateServerUrl(serverUrl: string): Promise<void> {
   await chrome.storage.sync.set({ serverUrl: serverUrl.replace(/\/+$/, '') });
 }
-
-export type Backend = 'local' | 'gemini';
-
-export interface TranslatorSettings {
-  backend: Backend;
-  geminiKey: string;
-  geminiModel: string;
-}
-
-export const GEMINI_MODELS: { id: string; label: string }[] = [
-  { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite: быстрый, больше бесплатных запросов' },
-  { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash: точнее, медленнее' },
-];
-
-const DEFAULT_TRANSLATOR: TranslatorSettings = { backend: 'local', geminiKey: '', geminiModel: GEMINI_MODELS[0].id };
-
-/** In local storage, not sync: the API key stays on this computer. */
-export async function loadTranslator(): Promise<TranslatorSettings> {
-  const { translator } = await chrome.storage.local.get('translator');
-  return { ...DEFAULT_TRANSLATOR, ...(translator as Partial<TranslatorSettings> | undefined) };
-}
-
-export async function updateTranslator(patch: Partial<TranslatorSettings>): Promise<TranslatorSettings> {
-  const translator = { ...(await loadTranslator()), ...patch };
-  await chrome.storage.local.set({ translator });
-  return translator;
-}
-
-/** The server picks the translator per request from these headers. */
-export async function translatorHeaders(): Promise<Record<string, string>> {
-  const t = await loadTranslator();
-  if (t.backend !== 'gemini') return { 'X-Oblachko-Backend': 'local' };
-  return { 'X-Oblachko-Backend': 'gemini', 'X-Oblachko-Key': t.geminiKey.trim(), 'X-Oblachko-Model': t.geminiModel };
-}

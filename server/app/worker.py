@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from .cache import ResultCache
 from .glossary import Glossary
 from .pipeline.pipeline import Pipeline, decode_image
-from .pipeline.translate import PROMPT_VERSION, Translator
+from .pipeline.translate import PROMPT_VERSION
 
 log = logging.getLogger("oblachko.worker")
 
@@ -36,7 +36,6 @@ class Job:
     context_key: str
     title_key: str
     priority: int
-    translator: Translator
     future: Future = field(default_factory=Future)
 
 
@@ -58,18 +57,15 @@ class Worker:
         with self._lock:
             return len(self._jobs)
 
-    def cache_key(self, image: bytes, lang: str, title_key: str, translator: Translator) -> str:
+    def cache_key(self, image: bytes, lang: str, title_key: str) -> str:
         digest = hashlib.sha1(image).hexdigest()
         # Names fixed by hand change the translation; names the LLM learned on its own don't count
         names = self.glossary.manual_hash(title_key) if title_key else "-"
-        return f"{digest}|{lang}|{translator.resolve_model()}|{PROMPT_VERSION}|{names}"
+        return f"{digest}|{lang}|{self.pipeline.translator.resolve_model()}|{PROMPT_VERSION}|{names}"
 
-    def submit(
-        self, image: bytes, lang: str, context_key: str, title_key: str, priority: int, translator: Translator | None = None
-    ) -> tuple[Future, bool]:
-        """Returns (future with the result, whether it came from the cache). translator: the local LLM when None."""
-        translator = translator or self.pipeline.translator
-        key = self.cache_key(image, lang, title_key, translator)
+    def submit(self, image: bytes, lang: str, context_key: str, title_key: str, priority: int) -> tuple[Future, bool]:
+        """Returns (future with the result, whether it came from the cache)."""
+        key = self.cache_key(image, lang, title_key)
         cached = self.cache.get(key)
         if cached is not None:
             done: Future = Future()
@@ -79,7 +75,7 @@ class Worker:
         with self._lock:
             job = self._jobs.get(key)
             if job is None:
-                job = Job(key, image, lang, context_key, title_key, priority, translator)
+                job = Job(key, image, lang, context_key, title_key, priority)
                 self._jobs[key] = job
                 self._queue.put((priority, next(self._seq), job))
             elif priority < job.priority:
@@ -120,7 +116,7 @@ class Worker:
         glossary = None
         if job.title_key:
             glossary = lambda lines: [(e.src, e.dst) for e in self.glossary.relevant(job.title_key, lines)]  # noqa: E731
-        result = self.pipeline.process(img, job.lang, context, glossary, job.translator)
+        result = self.pipeline.process(img, job.lang, context, glossary)
         result["hash"] = job.key.split("|", 1)[0]
         if job.title_key:
             self.glossary.learn(job.title_key, [(n["src"], n["dst"]) for n in result["names"]])

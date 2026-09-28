@@ -1,16 +1,5 @@
 import type { GlossaryEntry, HealthResponse, PageInfo, PopupToPage, TabStatus } from '../shared/messages';
-import {
-  GEMINI_MODELS,
-  loadSettings,
-  loadTranslator,
-  siteKey,
-  siteSettings,
-  updateServerUrl,
-  updateSite,
-  updateTranslator,
-  type Backend,
-  type Lang,
-} from '../shared/settings';
+import { loadSettings, siteKey, siteSettings, updateServerUrl, updateSite, type Lang } from '../shared/settings';
 import { compareVersions } from '../shared/version';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -41,7 +30,6 @@ async function init(): Promise<void> {
     $('site-section').hidden = true;
     $('unsupported').hidden = false;
   }
-  await initTranslator(host ? tab?.id : undefined);
 
   serverUrl.value = (await loadSettings()).serverUrl;
   $<HTMLFormElement>('server-form').addEventListener('submit', async (e) => {
@@ -63,8 +51,7 @@ async function checkHealth(): Promise<void> {
     statusEl.textContent = `${health.error ?? 'Сервер недоступен'}. Запустите сервер Oblachko.`;
   } else if (!health.llm?.ok) {
     dot.className = 'dot bad';
-    const name = health.llm?.name === 'Gemini API' ? 'Gemini API' : 'LLM';
-    statusEl.textContent = `Сервер работает, но ${name} недоступна: ${health.llm?.error ?? health.llm?.url}`;
+    statusEl.textContent = `Сервер работает, но LLM недоступна: ${health.llm?.error ?? health.llm?.url}`;
   } else {
     dot.className = 'dot ok';
     const gpu = health.device?.startsWith('CUDA') ? 'GPU' : 'CPU';
@@ -79,32 +66,6 @@ async function checkHealth(): Promise<void> {
     hint.textContent = `Сервер обновлён до ${health.version}, а расширение ещё ${own}. Откройте chrome://extensions и нажмите ↻ у Oblachko (расширение должно быть загружено из папки extension рядом с start.bat).`;
     hint.hidden = false;
   }
-}
-
-// --- Translator: the local LLM or the Gemini API ---
-
-async function initTranslator(tabId: number | undefined): Promise<void> {
-  const backend = $<HTMLSelectElement>('backend');
-  const key = $<HTMLInputElement>('gemini-key');
-  const model = $<HTMLSelectElement>('gemini-model');
-  model.append(...GEMINI_MODELS.map((m) => new Option(m.label, m.id)));
-
-  const t = await loadTranslator();
-  backend.value = t.backend;
-  key.value = t.geminiKey;
-  model.value = t.geminiModel;
-  $('gemini').hidden = t.backend !== 'gemini';
-
-  // Pages already on screen are redone by the new translator (the server caches each one separately)
-  const apply = async (patch: Parameters<typeof updateTranslator>[0]): Promise<void> => {
-    const now = await updateTranslator(patch);
-    $('gemini').hidden = now.backend !== 'gemini';
-    await checkHealth();
-    if (tabId !== undefined && (now.backend === 'local' || now.geminiKey)) await retranslate(tabId);
-  };
-  backend.addEventListener('change', () => void apply({ backend: backend.value as Backend }));
-  model.addEventListener('change', () => void apply({ geminiModel: model.value }));
-  key.addEventListener('change', () => void apply({ geminiKey: key.value.trim() }));
 }
 
 async function showTabError(tabId: number): Promise<void> {

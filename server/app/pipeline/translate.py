@@ -1,17 +1,12 @@
-"""Page translation through any OpenAI-compatible endpoint: a local one (LM Studio, Ollama, llama.cpp)
-or the Gemini API.
+"""Page translation through any OpenAI-compatible endpoint (LM Studio, Ollama, llama.cpp).
 
-All lines of a page go in one request, in reading order, and come back as structured JSON. A vision
-model (Gemini) also gets the page itself: it sees who speaks and can fix what OCR got wrong.
+All lines of a page go in one request, in reading order, and come back as structured JSON.
 """
 
 from __future__ import annotations
 
-import base64
 import json
-import logging
 import re
-import time
 from dataclasses import dataclass, field
 
 import httpx
@@ -40,16 +35,6 @@ Rules:
 - Return exactly one translation for every input id. Never merge, skip or add lines.
 - In "names" list every proper name you translated on this page (characters, places, groups, techniques) as it appears in the source and in Russian (nominative case). It keeps the next pages consistent.
 """
-
-VISION_NOTE = """\
-- The page image is attached. Each line has its "box" on the page: [ymin, xmin, ymax, xmax] scaled to 0-1000.
-  Look at the art to see who speaks to whom, their gender and mood. When the OCR text of a line is garbled,
-  read that bubble in the image yourself and translate what is really written there.
-"""
-
-GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
-
-log = logging.getLogger("oblachko.translate")
 
 RESPONSE_SCHEMA = {
     "type": "object",
@@ -86,12 +71,6 @@ _RETRY_NOTE = (
 )
 # Retries for lines that came back not in Russian; each entry is one more request of just those lines
 RETRY_TEMPERATURES = (0.5, 0.8)
-# Waits after "429 too many requests" from a cloud API (free tiers allow ~10 requests a minute)
-RATE_LIMIT_WAITS = (5.0, 15.0, 30.0)
-
-
-class TranslatorError(RuntimeError):
-    """A failure worth showing to the user as it is (bad API key, quota used up)."""
 
 
 def _not_russian(src: str, dst: str) -> bool:
@@ -104,26 +83,6 @@ def _not_russian(src: str, dst: str) -> bool:
         return False
     source_words = {w.lower() for w in _LATIN_WORD_RE.findall(src)}
     return any(w.islower() and w.lower() in source_words for w in _LATIN_WORD_RE.findall(dst))
-
-
-def _retry_after(resp: httpx.Response) -> float | None:
-    try:
-        return min(float(resp.headers["retry-after"]), 60.0)
-    except (KeyError, ValueError):
-        return None
-
-
-def _error_message(resp: httpx.Response) -> str:
-    try:
-        data = resp.json()
-    except ValueError:
-        return resp.text[:200]
-    if isinstance(data, list) and data:  # Gemini wraps its error in a list on the OpenAI endpoint
-        data = data[0]
-    error = data.get("error") if isinstance(data, dict) else None
-    if isinstance(error, dict):
-        return str(error.get("message") or error)[:300]
-    return str(data)[:300]
 
 
 @dataclass
@@ -145,33 +104,11 @@ class Translator:
         temperature: float = 0.3,
         timeout: float = 120.0,
         reasoning_effort: str = "none",
-        vision: bool = False,
-        name: str = "LLM",
     ):
         self.client = httpx.Client(base_url=base_url.rstrip("/"), timeout=timeout, headers={"Authorization": f"Bearer {api_key}"})
-        self.base_url = base_url
         self.model = model
         self.temperature = temperature
         self.reasoning_effort = reasoning_effort
-        # A cloud vision model: gets the page image with the lines, and its errors go to the user as they are
-        self.vision = vision
-        self.name = name
-        self._checked_at = 0.0
-
-    @classmethod
-    def gemini(cls, api_key: str, model: str, temperature: float = 0.3) -> Translator:
-        # Gemini 3.x can't switch thinking off; "minimal" keeps a page at a couple of seconds
-        return cls(GEMINI_BASE_URL, model, api_key, temperature, 90.0, "minimal", vision=True, name="Gemini API")
-
-    def check(self) -> str:
-        """Model name if the endpoint answers (and takes the key). A cloud check is remembered for a few
-        minutes: the popup asks often and every call counts against the free quota."""
-        if self.vision:
-            if time.monotonic() - self._checked_at > 300:
-                self._request("GET", "/models")
-                self._checked_at = time.monotonic()
-            return self.model
-        return self.resolve_model()
 
     def resolve_model(self) -> str:
         if not self.model:
@@ -182,34 +119,20 @@ class Translator:
         return self.model
 
     def translate(
-        self,
-        lines: list[str],
-        context: list[tuple[str, str]] = (),
-        glossary: list[tuple[str, str]] = (),
-        image: bytes | None = None,
-        boxes: list[list[int]] | None = None,
+        self, lines: list[str], context: list[tuple[str, str]] = (), glossary: list[tuple[str, str]] = ()
     ) -> TranslationResult:
-        """image: the page as JPEG, boxes: [ymin, xmin, ymax, xmax] 0-1000 per line; vision models only."""
         model = self.resolve_model()
         if not lines:
             return TranslationResult([], model)
 
-        see_page = self.vision and image is not None
         user: dict = {"lines": [{"id": i, "text": t} for i, t in enumerate(lines)]}
-        if see_page and boxes:
-            for line, box in zip(user["lines"], boxes):
-                line["box"] = box
         if glossary:
             user["glossary"] = [{"source": s, "russian": d} for s, d in glossary]
         if context:
             user["previous_page"] = [{"source": s, "translation": d} for s, d in context]
-        content: str | list = json.dumps(user, ensure_ascii=False)
-        if see_page:
-            data_url = "data:image/jpeg;base64," + base64.b64encode(image).decode()
-            content = [{"type": "image_url", "image_url": {"url": data_url}}, {"type": "text", "text": content}]
         messages = [
-            {"role": "system", "content": SYSTEM_PROMPT + (VISION_NOTE if see_page else "")},
-            {"role": "user", "content": content},
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": json.dumps(user, ensure_ascii=False)},
         ]
         raw, usage = self._complete(model, messages)
         texts, names = self._parse(raw, lines)
@@ -228,11 +151,7 @@ class Translator:
             }
             if glossary:
                 retry_user["glossary"] = user["glossary"]
-            # Text only: the image already did its job, and every image costs quota
-            retry_messages = [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": json.dumps(retry_user, ensure_ascii=False)},
-            ]
+            retry_messages = [messages[0], {"role": "user", "content": json.dumps(retry_user, ensure_ascii=False)}]
             retry_raw, retry_usage = self._complete(model, retry_messages, temperature)
             retry_texts, _ = self._parse(retry_raw, [lines[i] for i in bad])
             for n, i in enumerate(bad):
@@ -253,30 +172,8 @@ class Translator:
         }
         if self.reasoning_effort:
             body["reasoning_effort"] = self.reasoning_effort
-        resp = self._request("POST", "/chat/completions", json=body)
+        resp = self.client.post("/chat/completions", json=body).raise_for_status().json()
         return resp["choices"][0]["message"]["content"] or "", resp.get("usage") or {}
-
-    def _request(self, method: str, path: str, **kwargs) -> dict:
-        """Waits out short rate limits; turns cloud API errors into messages a user can act on."""
-        for attempt in range(len(RATE_LIMIT_WAITS) + 1):
-            resp = self.client.request(method, path, **kwargs)
-            if resp.status_code != 429 or attempt == len(RATE_LIMIT_WAITS):
-                break
-            wait = _retry_after(resp) or RATE_LIMIT_WAITS[attempt]
-            log.info("%s: too many requests, waiting %.0fs", self.name, wait)
-            time.sleep(wait)
-        if resp.is_success:
-            return resp.json()
-        if not self.vision:
-            resp.raise_for_status()
-        detail = _error_message(resp)
-        if resp.status_code == 429:
-            raise TranslatorError(f"Лимит {self.name} исчерпан, попробуйте позже ({detail})")
-        if resp.status_code in (400, 401, 403) and "key" in detail.lower():
-            raise TranslatorError(f"{self.name}: ключ не подходит ({detail})")
-        if resp.status_code in (400, 403) and "location" in detail.lower():
-            raise TranslatorError(f"{self.name} недоступен из вашей страны, нужен VPN ({detail})")
-        raise TranslatorError(f"{self.name}: HTTP {resp.status_code} {detail}")
 
     @staticmethod
     def _parse(raw: str, lines: list[str]) -> tuple[list[str], list[tuple[str, str]]]:
