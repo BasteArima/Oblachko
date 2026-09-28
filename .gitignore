@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# Model weights and runtime data
+server/models/
+server/cache/
+server/bench_out/
+
+# Test pages are copyrighted, keep them local only
+test_pages/
+
+# Node / extension
+node_modules/
+extension/dist/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
