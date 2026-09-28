@@ -13,6 +13,7 @@
     </header>
 
     <p id="status" class="status">Проверяю сервер…</p>
+    <p id="tab-error" class="tab-error" hidden></p>
 
     <section id="site-section">
       <label class="toggle">
@@ -33,6 +34,20 @@
     </section>
 
     <p id="unsupported" class="hint" hidden>На этой странице расширение не работает.</p>
+
+    <details id="glossary" hidden>
+      <summary>Имена в этом тайтле <span id="glossary-count" class="count"></span></summary>
+      <p class="hint">Переводчик запоминает имена сам. Исправьте неудачные, и страницы переведутся заново.</p>
+      <form id="glossary-form">
+        <div id="glossary-rows" class="rows"></div>
+        <div class="row">
+          <button type="button" id="glossary-add">+ Имя</button>
+          <span class="spacer"></span>
+          <button type="submit" id="glossary-save">Сохранить</button>
+        </div>
+        <p id="glossary-status" class="hint"></p>
+      </form>
+    </details>
 
     <details>
       <summary>Сервер</summary>

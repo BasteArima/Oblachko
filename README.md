@@ -14,16 +14,28 @@ Source languages: Japanese, English. Target: Russian.
             over each bubble
 ```
 
-The page on screen is translated first, the next pages are prefetched while you read. Results are cached by image hash, so re-opening a chapter is instant.
+- The page on screen is translated first, the next pages are prefetched while you read.
+- Results are cached by image hash: re-opening a chapter is instant.
+- Pages of a chapter share context; names are kept in a per-title glossary so a character keeps one Russian name. The glossary can be edited in the popup.
+- Works with `<img>` and `<canvas>` readers, anti-hotlink CDNs (Referer is set), webtoon strips; when pixels can't be read, the page is cropped from a tab screenshot.
 
 ## 1. LM Studio
 
-1. Download a model. Tested: `google/gemma-4-12b-qat` (best quality), `qwen3.5-9b` (faster, weaker).
+1. Download a model. Tested: `google/gemma-4-12b-qat` (best quality), `qwen3.5-9b` (smaller, weaker).
 2. Developer tab: load the model and start the server. Note the port it shows (default 1234).
+
+### 8 GB VRAM
+
+The server takes about 0.8 GB of VRAM (detector and OCR in fp16). Windows and Chrome take roughly another 1 GB, which leaves ~6 GB for the LLM:
+
+- load the model with a small context (4096 is plenty: one page is ~1000 tokens);
+- a 9B model at Q4 (~6 GB) fits; a 12B model at Q4 (~6.7 GB) needs a couple of layers offloaded to the CPU in LM Studio, which costs some speed.
 
 ## 2. Server
 
-Requirements: NVIDIA GPU, [uv](https://docs.astral.sh/uv/).
+Windows: install [uv](https://docs.astral.sh/uv/) once, then double-click `server/start.bat`. The first run downloads the text detector (~95 MB), the Python packages (a few GB, mostly PyTorch) and the OCR model (~450 MB); later runs start in seconds. If LM Studio doesn't use port 1234, set `llm_base_url` in `server/config.toml`.
+
+Manually:
 
 ```bash
 cd server
@@ -33,7 +45,7 @@ cp config.example.toml config.toml   # set llm_base_url to the LM Studio port
 uv run python -m app
 ```
 
-The server listens on `http://127.0.0.1:8765`. The first start downloads the manga-ocr model (~450 MB).
+The server listens on `http://127.0.0.1:8765`.
 
 Benchmark on local test pages (side-by-side debug images go to `server/bench_out/`):
 
@@ -51,6 +63,8 @@ npm run build
 
 Chrome → `chrome://extensions` → enable Developer mode → **Load unpacked** → pick `extension/dist`.
 
-Open a manga chapter, click the Oblachko icon and enable **Переводить на этом сайте**. Hold **Alt** to peek at the original.
+Open a manga chapter, click the Oblachko icon and enable **Переводить на этом сайте**. Hold **Alt** to peek at the original. If a page shows a red **!**, hover it or open the popup to see the error.
 
 For development, `npm run dev` rebuilds on every change; reload the extension on `chrome://extensions` afterwards.
+
+The bundled font is [Comic Relief](https://github.com/loudifier/Comic-Relief) (SIL Open Font License, see `extension/public/fonts/OFL.txt`).

@@ -30,6 +30,8 @@ export default defineManifest({
       run_at: 'document_idle',
     },
   ],
+  // The content script loads the bundled comic font from here
+  web_accessible_resources: [{ resources: ['fonts/*'], matches: ['<all_urls>'] }],
   // declarativeNetRequestWithHostAccess: set Referer on image downloads (anti-hotlink CDNs)
   permissions: ['storage', 'declarativeNetRequestWithHostAccess'],
   // Page images live on arbitrary CDNs; the service worker downloads them past CORS,

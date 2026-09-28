@@ -27,7 +27,7 @@ const STYLE = `
   /* No plate: the bubble area is larger than the cleaned text box and a rectangle would cover
      the bubble outline. A halo in the bubble colour keeps letters readable over leftover lines. */
   text-shadow: 0 0 2px var(--bg), 0 0 2px var(--bg), 0 0 3px var(--bg), 0 0 5px var(--bg);
-  font-family: 'Comic Sans MS', 'Segoe Print', 'Trebuchet MS', sans-serif;
+  font-family: 'Oblachko Comic', 'Comic Sans MS', 'Segoe Print', 'Trebuchet MS', sans-serif;
   font-weight: 700;
   line-height: 1.1;
   white-space: pre-line;
@@ -84,6 +84,10 @@ export class Overlay {
     addEventListener('blur', this.onBlur);
     // Readers flip pages by toggling display/classes without any scroll or resize event
     this.timer = window.setInterval(this.schedule, 500);
+    // Text fitted with the fallback font has the wrong size once the comic font arrives
+    void loadComicFont().then(() => {
+      for (const view of this.views) view.refit();
+    });
   }
 
   attach(el: PageElement): PageView {
@@ -209,6 +213,12 @@ export class PageView {
     this.onRemove();
   }
 
+  refit(): void {
+    if (!this.result) return;
+    this.needsFit = true;
+    this.update();
+  }
+
   update(): void {
     if (!this.source.isConnected) {
       this.remove();
@@ -242,6 +252,21 @@ export class PageView {
       fitText(el, Number(el.dataset.h), Math.round(pageH * MIN_FONT), Math.round(Math.min(pageH * MAX_FONT, maxByWidth)));
     }
   }
+}
+
+let comicFont: Promise<void> | null = null;
+
+/**
+ * Comic Relief (OFL, has Cyrillic) bundled with the extension. Loaded from bytes rather than a URL
+ * so the page's CSP font-src can't block it; document fonts are visible inside our shadow root.
+ */
+function loadComicFont(): Promise<void> {
+  comicFont ??= (async () => {
+    const resp = await fetch(chrome.runtime.getURL('fonts/ComicRelief-Bold.ttf'));
+    const face = new FontFace('Oblachko Comic', await resp.arrayBuffer(), { weight: '700' });
+    document.fonts.add(await face.load());
+  })().catch((err: unknown) => console.warn('[Oblachko] comic font not loaded, using a system font', err));
+  return comicFont;
 }
 
 /** Largest font size (natural px) at which the text fits the bubble box; boxes grow past it only at the minimum size. */

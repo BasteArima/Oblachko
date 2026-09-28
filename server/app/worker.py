@@ -18,6 +18,7 @@ from concurrent.futures import Future
 from dataclasses import dataclass, field
 
 from .cache import ResultCache
+from .glossary import Glossary
 from .pipeline.pipeline import Pipeline, decode_image
 from .pipeline.translate import PROMPT_VERSION
 
@@ -33,14 +34,16 @@ class Job:
     image: bytes
     lang: str
     context_key: str
+    title_key: str
     priority: int
     future: Future = field(default_factory=Future)
 
 
 class Worker:
-    def __init__(self, pipeline: Pipeline, cache: ResultCache):
+    def __init__(self, pipeline: Pipeline, cache: ResultCache, glossary: Glossary):
         self.pipeline = pipeline
         self.cache = cache
+        self.glossary = glossary
         self._queue: queue.PriorityQueue[tuple[int, int, Job]] = queue.PriorityQueue()
         self._seq = itertools.count()
         self._jobs: dict[str, Job] = {}
@@ -54,13 +57,15 @@ class Worker:
         with self._lock:
             return len(self._jobs)
 
-    def cache_key(self, image: bytes, lang: str) -> str:
+    def cache_key(self, image: bytes, lang: str, title_key: str) -> str:
         digest = hashlib.sha1(image).hexdigest()
-        return f"{digest}|{lang}|{self.pipeline.translator.resolve_model()}|{PROMPT_VERSION}"
+        # Names fixed by hand change the translation; names the LLM learned on its own don't count
+        names = self.glossary.manual_hash(title_key) if title_key else "-"
+        return f"{digest}|{lang}|{self.pipeline.translator.resolve_model()}|{PROMPT_VERSION}|{names}"
 
-    def submit(self, image: bytes, lang: str, context_key: str, priority: int) -> tuple[Future, bool]:
+    def submit(self, image: bytes, lang: str, context_key: str, title_key: str, priority: int) -> tuple[Future, bool]:
         """Returns (future with the result, whether it came from the cache)."""
-        key = self.cache_key(image, lang)
+        key = self.cache_key(image, lang, title_key)
         cached = self.cache.get(key)
         if cached is not None:
             done: Future = Future()
@@ -70,7 +75,7 @@ class Worker:
         with self._lock:
             job = self._jobs.get(key)
             if job is None:
-                job = Job(key, image, lang, context_key, priority)
+                job = Job(key, image, lang, context_key, title_key, priority)
                 self._jobs[key] = job
                 self._queue.put((priority, next(self._seq), job))
             elif priority < job.priority:
@@ -78,10 +83,6 @@ class Worker:
                 job.priority = priority
                 self._queue.put((priority, next(self._seq), job))
         return job.future, False
-
-    def forget_context(self, context_key: str) -> None:
-        with self._lock:
-            self._contexts.pop(context_key, None)
 
     def _run(self) -> None:
         while True:
@@ -103,8 +104,13 @@ class Worker:
         img = decode_image(job.image)
         with self._lock:
             context = list(self._contexts.get(job.context_key, ()))
-        result = self.pipeline.process(img, job.lang, context)
+        glossary = None
+        if job.title_key:
+            glossary = lambda lines: [(e.src, e.dst) for e in self.glossary.relevant(job.title_key, lines)]  # noqa: E731
+        result = self.pipeline.process(img, job.lang, context, glossary)
         result["hash"] = job.key.split("|", 1)[0]
+        if job.title_key:
+            self.glossary.learn(job.title_key, [(n["src"], n["dst"]) for n in result["names"]])
 
         if job.context_key and result["blocks"]:
             with self._lock:

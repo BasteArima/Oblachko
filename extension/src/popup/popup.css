@@ -141,3 +141,64 @@ summary {
 details .field {
   margin-top: 8px;
 }
+
+details + details {
+  margin-top: 10px;
+}
+
+details .hint {
+  margin: 6px 0;
+}
+
+.tab-error {
+  margin: -6px 0 12px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bad) 12%, transparent);
+  color: var(--bad);
+  font-size: 12px;
+  word-break: break-word;
+}
+
+.count {
+  color: var(--muted);
+}
+
+.rows {
+  display: grid;
+  gap: 4px;
+  max-height: 180px;
+  margin-bottom: 6px;
+  overflow-y: auto;
+}
+
+.name-row {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr auto;
+  align-items: center;
+  gap: 4px;
+}
+
+.name-row input {
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.name-row input[readonly] {
+  border-color: transparent;
+}
+
+.name-row .remove {
+  padding: 2px 6px;
+  border: none;
+  color: var(--muted);
+}
+
+.spacer {
+  flex: 1;
+}

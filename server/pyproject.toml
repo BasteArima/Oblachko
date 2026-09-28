@@ -11,9 +11,12 @@ dependencies = [
     "numpy>=1.26",
     "opencv-python-headless>=4.10",
     "pillow>=10.4",
-    # 1.24+ is built against CUDA 13, torch cu128 ships CUDA 12 DLLs that ORT reuses via preload_dlls()
-    "onnxruntime-gpu>=1.20,<1.24",
+    # CPU only: RapidOCR and the detector without a GPU. On GPU the detector runs in torch (see detect.py)
+    "onnxruntime>=1.20",
+    "onnx>=1.17",
+    "onnx2torch>=1.5",
     "torch>=2.7",
+    "torchvision>=0.22",
     "manga-ocr>=0.1.14",
     "rapidocr>=3.0",
 ]
@@ -29,3 +32,4 @@ explicit = true
 
 [tool.uv.sources]
 torch = { index = "pytorch-cu128" }
+torchvision = { index = "pytorch-cu128" }

@@ -3,13 +3,17 @@
  * Content scripts can't reach http://127.0.0.1 from an https page and can't read cross-origin
  * images; the service worker can, thanks to host_permissions.
  */
-import type { CaptureResponse, HealthResponse, Message, TranslateRequest, TranslateResponse } from '../shared/messages';
+import type { CaptureResponse, HealthResponse, Message, TabStatus, TranslateRequest, TranslateResponse } from '../shared/messages';
 import { loadSettings } from '../shared/settings';
 
 /** chrome.tabs.captureVisibleTab allows 2 calls per second. */
 const CAPTURE_INTERVAL_MS = 550;
 
 class FetchError extends Error {}
+
+/** Lost when the service worker sleeps; the content script re-reports on the next change. */
+const tabStatus = new Map<number, TabStatus>();
+chrome.tabs.onRemoved.addListener((tabId) => tabStatus.delete(tabId));
 
 chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
   switch (msg.type) {
@@ -25,7 +29,16 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
       health().then(sendResponse);
       return true;
     case 'status':
-      if (sender.tab?.id !== undefined) setBadge(sender.tab.id, msg.pending, msg.errors);
+      if (sender.tab?.id !== undefined) {
+        const previous = tabStatus.get(sender.tab.id);
+        // Keep the last error until the tab has no errors left, so the popup can explain the red badge
+        const lastError = msg.lastError ?? (msg.errors > 0 ? previous?.lastError : undefined);
+        tabStatus.set(sender.tab.id, { pending: msg.pending, errors: msg.errors, lastError });
+        setBadge(sender.tab.id, msg.pending, msg.errors);
+      }
+      return false;
+    case 'tab-status':
+      sendResponse(tabStatus.get(msg.tabId) ?? { pending: 0, errors: 0 });
       return false;
   }
 });
@@ -38,6 +51,7 @@ async function translate(req: TranslateRequest): Promise<TranslateResponse> {
   form.append('image', image, 'page');
   form.append('lang', req.lang);
   form.append('context_key', req.contextKey);
+  form.append('title_key', req.titleKey);
   form.append('priority', String(req.priority));
 
   let resp: Response;

@@ -6,6 +6,7 @@ import io
 import re
 import time
 import unicodedata
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 
 import numpy as np
@@ -78,7 +79,14 @@ class Pipeline:
         self.ocr_ja()
         self.ocr_en()
 
-    def process(self, img_rgb: np.ndarray, lang: str = "auto", context: list[tuple[str, str]] = ()) -> dict:
+    def process(
+        self,
+        img_rgb: np.ndarray,
+        lang: str = "auto",
+        context: list[tuple[str, str]] = (),
+        glossary: Callable[[list[str]], list[tuple[str, str]]] | None = None,
+    ) -> dict:
+        """glossary: returns the known (source, russian) names that occur in the given page lines."""
         timings: dict[str, float] = {}
         h, w = img_rgb.shape[:2]
 
@@ -119,7 +127,9 @@ class Pipeline:
                 blk.dst = unicodedata.normalize("NFKC", blk.src)  # "！？" -> "!?", fonts rarely have full-width glyphs
             else:
                 to_translate.append(blk)
-        result = self.translator.translate([blk.src for blk in to_translate], context)
+        lines = [blk.src for blk in to_translate]
+        known_names = glossary(lines) if glossary and lines else []
+        result = self.translator.translate(lines, context, known_names)
         for blk, dst in zip(to_translate, result.texts):
             blk.dst = _sentence_case(dst) if dst.isupper() else dst
         timings["translate"] = time.perf_counter() - t
@@ -130,6 +140,7 @@ class Pipeline:
             "lang": page_lang,
             "model": result.model,
             "tokens": {"prompt": result.prompt_tokens, "completion": result.completion_tokens},
+            "names": [{"src": s, "dst": d} for s, d in result.names],
             "timings": {k: round(v, 3) for k, v in timings.items()},
             "blocks": [asdict(blk) for blk in blocks],
         }

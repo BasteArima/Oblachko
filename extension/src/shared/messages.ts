@@ -33,7 +33,10 @@ export interface TranslateRequest {
   type: 'translate';
   image: ImagePayload;
   lang: Lang;
+  /** Chapter: pages share translation context */
   contextKey: string;
+  /** Title: chapters share the name glossary */
+  titleKey: string;
   /** 0 = on screen, 1 = near the viewport, 2 = hidden preloaded page */
   priority: number;
   /** Sent as Referer when downloading a url image: many CDNs refuse hotlinks without it */
@@ -51,13 +54,38 @@ export interface CaptureRequest {
 
 export type CaptureResponse = { ok: true; dataUrl: string } | { ok: false; error: string };
 
+/** Content script -> service worker: progress on this tab (toolbar badge, popup). */
 export interface StatusMessage {
   type: 'status';
   pending: number;
   errors: number;
+  lastError?: string;
 }
 
-export type Message = TranslateRequest | HealthRequest | CaptureRequest | StatusMessage;
+/** Popup -> service worker: the last status of a tab. */
+export interface TabStatusRequest {
+  type: 'tab-status';
+  tabId: number;
+}
+
+export type TabStatus = Omit<StatusMessage, 'type'>;
+
+/** Popup -> content script of the active tab. */
+export interface PageInfoRequest {
+  type: 'page-info';
+}
+
+export interface PageInfo {
+  titleKey: string;
+}
+
+export type Message = TranslateRequest | HealthRequest | CaptureRequest | StatusMessage | TabStatusRequest;
+
+export interface GlossaryEntry {
+  src: string;
+  dst: string;
+  manual?: boolean;
+}
 
 export type TranslateResponse =
   | { ok: true; result: PageResult }

@@ -1,7 +1,9 @@
 """HTTP API for the extension.
 
-POST /translate  multipart: image (file), lang (auto|ja|en), context_key, priority (0 = on screen)
+POST /translate  multipart: image (file), lang (auto|ja|en), context_key (chapter), title_key, priority (0 = on screen)
 GET  /health     server, model and queue status
+GET  /glossary?title=...  names known for a title
+PUT  /glossary   {"title": ..., "entries": [{"src": ..., "dst": ...}]}  replace with the user's edits
 POST /cache/clear
 """
 
@@ -11,13 +13,16 @@ import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager
+from dataclasses import asdict
 
 import httpx
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 from .cache import ResultCache
 from .config import SERVER_DIR, load_settings
+from .glossary import Glossary
 from .pipeline.pipeline import Pipeline
 from .worker import Worker
 
@@ -35,7 +40,11 @@ async def lifespan(_: FastAPI):
     t = time.perf_counter()
     pipeline = Pipeline(settings)
     pipeline.warmup()
-    state["worker"] = Worker(pipeline, ResultCache(SERVER_DIR / "cache" / "results.sqlite"))
+    state["worker"] = Worker(
+        pipeline,
+        ResultCache(SERVER_DIR / "cache" / "results.sqlite"),
+        Glossary(SERVER_DIR / "cache" / "glossary.sqlite"),
+    )
     log.info("models loaded in %.1fs, detector on %s", time.perf_counter() - t, pipeline.detector.provider)
     yield
 
@@ -64,6 +73,7 @@ async def translate(
     image: UploadFile = File(...),
     lang: str = Form("auto"),
     context_key: str = Form(""),
+    title_key: str = Form(""),
     priority: int = Form(1),
 ) -> dict:
     if lang not in LANGS:
@@ -76,7 +86,7 @@ async def translate(
 
     worker: Worker = state["worker"]
     try:
-        future, cached = worker.submit(data, lang, context_key, priority)
+        future, cached = worker.submit(data, lang, context_key, title_key, priority)
         result = await asyncio.wrap_future(future)
     except httpx.HTTPError as exc:
         raise HTTPException(503, f"LLM request failed: {exc}") from exc
@@ -85,6 +95,29 @@ async def translate(
     except OSError as exc:  # Pillow could not decode the image
         raise HTTPException(422, f"cannot read image: {exc}") from exc
     return {**result, "cached": cached}
+
+
+class GlossaryEntry(BaseModel):
+    src: str
+    dst: str
+
+
+class GlossaryUpdate(BaseModel):
+    title: str
+    entries: list[GlossaryEntry]
+
+
+@app.get("/glossary")
+async def get_glossary(title: str) -> dict:
+    worker: Worker = state["worker"]
+    return {"title": title, "entries": [asdict(e) for e in worker.glossary.entries(title)]}
+
+
+@app.put("/glossary")
+async def put_glossary(update: GlossaryUpdate) -> dict:
+    worker: Worker = state["worker"]
+    worker.glossary.replace(update.title, [(e.src, e.dst) for e in update.entries])
+    return {"title": update.title, "entries": [asdict(e) for e in worker.glossary.entries(update.title)]}
 
 
 @app.post("/cache/clear")

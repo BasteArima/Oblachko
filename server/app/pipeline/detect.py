@@ -12,6 +12,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 import onnxruntime as ort
+import torch
 
 MODEL_FILE = "comictextdetector.pt.onnx"
 INPUT_SIZE = 1024
@@ -44,27 +45,38 @@ class DetectedBlock:
 
 
 class TextDetector:
+    """On GPU the ONNX graph is converted to torch and run in fp16: it then shares the CUDA context
+    and allocator with manga-ocr and takes ~360 MiB instead of ~1.3 GiB under onnxruntime-gpu,
+    which matters next to an LLM on an 8 GB card. Detections match (69/69 blocks on the test pages)."""
+
     def __init__(self, models_dir: Path, device: str = "cuda", conf_thresh: float = 0.4, nms_thresh: float = 0.35):
-        providers: list = ["CPUExecutionProvider"]
-        if device == "cuda":
-            # EXHAUSTIVE (default) benchmarks every conv algorithm on the first run: ~40 s stall
-            cuda_options = {
-                "cudnn_conv_algo_search": "HEURISTIC",
-                # Default kNextPowerOfTwo grows the arena in doubling steps: wasted VRAM on 8 GB cards
-                "arena_extend_strategy": "kSameAsRequested",
-            }
-            providers.insert(0, ("CUDAExecutionProvider", cuda_options))
-            # Use the CUDA / cuDNN DLLs shipped with the torch wheel instead of a system-wide CUDA install
-            ort.preload_dlls()
-        self.session = ort.InferenceSession(str(models_dir / MODEL_FILE), providers=providers)
-        self.input_name = self.session.get_inputs()[0].name
         self.conf_thresh = conf_thresh
         self.nms_thresh = nms_thresh
+        path = models_dir / MODEL_FILE
+        if device == "cuda" and torch.cuda.is_available():
+            import warnings
+
+            import onnx
+            from onnx2torch import convert
+
+            self._model = convert(onnx.load(str(path))).eval().half().cuda()
+            # onnx2torch's Slice converter indexes with a list; harmless, but it warns on every call
+            warnings.filterwarnings("ignore", message="Using a non-tuple sequence", category=UserWarning)
+            self.provider = "CUDA (torch fp16)"
+            self._infer = self._infer_torch
+        else:
+            self._session = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
+            self.provider = "CPU (onnxruntime)"
+            self._infer = self._infer_onnx
         self(np.full((64, 64, 3), 255, np.uint8))  # warm-up: first CUDA run allocates and compiles
 
-    @property
-    def provider(self) -> str:
-        return self.session.get_providers()[0]
+    def _infer_torch(self, blob: np.ndarray) -> list[np.ndarray]:
+        with torch.inference_mode():
+            outputs = self._model(torch.from_numpy(blob).cuda().half())
+            return [o.float().cpu().numpy() for o in outputs]
+
+    def _infer_onnx(self, blob: np.ndarray) -> list[np.ndarray]:
+        return self._session.run(None, {self._session.get_inputs()[0].name: blob})
 
     def __call__(self, img_bgr: np.ndarray) -> tuple[list[DetectedBlock], np.ndarray]:
         """Returns text blocks and a uint8 text mask, both in original image coordinates."""
@@ -97,7 +109,7 @@ class TextDetector:
         canvas[:new_h, :new_w] = cv2.resize(img_bgr, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
         blob = canvas.transpose(2, 0, 1)[None].astype(np.float32) / 255
 
-        outputs = self.session.run(None, {self.input_name: blob})
+        outputs = self._infer(blob)
         blks = next(o for o in outputs if o.ndim == 3)
         seg = next(o for o in outputs if o.ndim == 4 and o.shape[1] == 1)
 

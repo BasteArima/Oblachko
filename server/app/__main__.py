@@ -8,5 +8,7 @@ from .config import load_settings
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    # Every LLM call and Hugging Face check would otherwise be an INFO line
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     settings = load_settings()
     uvicorn.run("app.main:app", host=settings.host, port=settings.port, log_level="info")

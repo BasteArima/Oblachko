@@ -2,11 +2,12 @@
  * Finds manga pages on the current site and gets them translated, closest to the reader first:
  *   0 - on screen, 1 - within ~1.5 screens (prefetch), 2 - preloaded but hidden (paged readers).
  */
-import type { ImagePayload, PageResult, TranslateRequest, TranslateResponse } from '../shared/messages';
+import type { ImagePayload, PageResult, StatusMessage, TranslateRequest, TranslateResponse } from '../shared/messages';
 import type { Lang } from '../shared/settings';
 import { fullyVisible, naturalSize, type PageElement } from './geometry';
 import { capturePixels, contentKey, NotVisibleError, readPixels } from './image-source';
 import { Overlay, type PageView } from './overlay';
+import { chapterKey, titleKey } from './title';
 
 /** Smaller images are avatars, thumbnails and ads, not pages. */
 const MIN_SIDE = 300;
@@ -176,6 +177,7 @@ export class PageTranslator {
       image,
       lang: this.lang,
       contextKey: chapterKey(),
+      titleKey: titleKey(),
       priority,
       pageUrl: location.href,
     };
@@ -198,17 +200,18 @@ export class PageTranslator {
       state.view.setError(response.error);
       console.warn('[Oblachko]', response.error);
     }
-    this.reportStatus();
+    this.reportStatus(response.ok ? undefined : response.error);
   }
 
-  private reportStatus(): void {
+  private reportStatus(lastError?: string): void {
     let pending = 0;
     let errors = 0;
     for (const state of this.pages.values()) {
       if (state.status === 'pending') pending++;
       else if (state.status === 'error') errors++;
     }
-    chrome.runtime.sendMessage({ type: 'status', pending, errors }).catch(() => {});
+    const status: StatusMessage = { type: 'status', pending, errors, lastError };
+    chrome.runtime.sendMessage(status).catch(() => {});
   }
 }
 
@@ -235,11 +238,6 @@ function priorityOf(el: PageElement): number | null {
 
 function failure(err: unknown): TranslateResponse {
   return { ok: false, error: err instanceof Error ? err.message : String(err) };
-}
-
-/** Pages of one chapter share translation context. Paged readers put the page number last (MangaDex: /chapter/<id>/2). */
-function chapterKey(): string {
-  return location.origin + location.pathname.replace(/\/\d+\/?$/, '');
 }
 
 function logResult(result: PageResult): void {
