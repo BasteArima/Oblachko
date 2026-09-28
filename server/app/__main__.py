@@ -53,4 +53,7 @@ if __name__ == "__main__":
         print(taken)
         sys.exit(1)
     # No line per HTTP request: the worker logs one line per translated page instead
-    uvicorn.run("app.main:app", host=settings.host, port=settings.port, log_level="info", access_log=False)
+    try:
+        uvicorn.run("app.main:app", host=settings.host, port=settings.port, log_level="info", access_log=False)
+    except KeyboardInterrupt:  # Ctrl+C in the start.bat window: a normal way to stop, not an error
+        pass

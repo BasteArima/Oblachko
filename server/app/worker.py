@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from .cache import ResultCache
 from .glossary import Glossary
 from .pipeline.pipeline import Pipeline, decode_image
-from .pipeline.translate import PROMPT_VERSION, Translator
+from .pipeline.translate import PROMPT_VERSION, Translator, TranslatorError
 
 log = logging.getLogger("oblachko.worker")
 
@@ -106,6 +106,10 @@ class Worker:
                     t.get("translate", 0),
                     self.pending - 1,  # this job leaves _jobs in the finally below
                 )
+            except TranslatorError as exc:
+                # Quota, key, overload: the message says it all, a traceback would only bury it
+                log.warning("page failed: %s", exc)
+                job.future.set_exception(exc)
             except Exception as exc:  # noqa: BLE001 - the error goes back to the HTTP caller
                 log.exception("page failed")
                 job.future.set_exception(exc)

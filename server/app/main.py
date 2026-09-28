@@ -25,14 +25,13 @@ from .cache import ResultCache
 from .config import SERVER_DIR, VERSION, load_settings
 from .glossary import Glossary
 from .pipeline.pipeline import Pipeline, is_raster_image
-from .pipeline.translate import Translator, TranslatorError
+from .pipeline.translate import GEMINI_MODELS, Translator, TranslatorError
 from .worker import Worker
 
 log = logging.getLogger("oblachko")
 
 MAX_IMAGE_BYTES = 30 * 1024 * 1024
 LANGS = {"auto", "ja", "en"}
-GEMINI_MODELS = {"gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.8-flash", "gemini-3.5-flash"}
 
 settings = load_settings()
 state: dict = {}
@@ -70,7 +69,7 @@ def pick_translator(backend: str | None, key: str | None, model: str | None) -> 
         raise HTTPException(400, f"unknown translator {backend!r}")
     if not key:
         raise HTTPException(400, "Не задан ключ Gemini API: впишите его в попапе Oblachko")
-    model = model if model in GEMINI_MODELS else "gemini-3.5-flash-lite"
+    model = model if model in GEMINI_MODELS else GEMINI_MODELS[0]
     translator = _cloud_translators.get((key, model))
     if translator is None:
         translator = _cloud_translators[(key, model)] = Translator.gemini(key, model, settings.llm_temperature)

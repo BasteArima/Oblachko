@@ -88,10 +88,20 @@ _RETRY_NOTE = (
 RETRY_TEMPERATURES = (0.5, 0.8)
 # Waits after "429 too many requests" from a cloud API (free tiers allow ~10 requests a minute)
 RATE_LIMIT_WAITS = (5.0, 15.0, 30.0)
+# "Model overloaded" and other server-side failures: a short retry, then the next model
+OVERLOAD_CODES = (500, 502, 503, 504)
+OVERLOAD_WAITS = (2.0, 5.0)
+OVERLOAD_SKIP_S = 180.0
+# Tried in this order when the chosen Gemini model is overloaded
+GEMINI_MODELS = ("gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.8-flash", "gemini-3.5-flash")
 
 
 class TranslatorError(RuntimeError):
     """A failure worth showing to the user as it is (bad API key, quota used up)."""
+
+    def __init__(self, message: str, overloaded: bool = False):
+        super().__init__(message)
+        self.overloaded = overloaded
 
 
 def _not_russian(src: str, dst: str) -> bool:
@@ -156,12 +166,16 @@ class Translator:
         # A cloud vision model: gets the page image with the lines, and its errors go to the user as they are
         self.vision = vision
         self.name = name
+        self.fallback_models: tuple[str, ...] = ()
+        self._busy_until: dict[str, float] = {}
         self._checked_at = 0.0
 
     @classmethod
     def gemini(cls, api_key: str, model: str, temperature: float = 0.3) -> Translator:
         # Gemini 3.x can't switch thinking off; "minimal" keeps a page at a couple of seconds
-        return cls(GEMINI_BASE_URL, model, api_key, temperature, 90.0, "minimal", vision=True, name="Gemini API")
+        translator = cls(GEMINI_BASE_URL, model, api_key, temperature, 90.0, "minimal", vision=True, name="Gemini API")
+        translator.fallback_models = tuple(m for m in GEMINI_MODELS if m != model)
+        return translator
 
     def check(self) -> str:
         """Model name if the endpoint answers (and takes the key). A cloud check is remembered for a few
@@ -253,23 +267,41 @@ class Translator:
         }
         if self.reasoning_effort:
             body["reasoning_effort"] = self.reasoning_effort
-        resp = self._request("POST", "/chat/completions", json=body)
+        # A cloud model that is overloaded ("503 high demand") hands the page to the next one; it is
+        # skipped for a while after that, so every page doesn't wait for it first
+        now = time.monotonic()
+        candidates = [m for m in (model, *self.fallback_models) if self._busy_until.get(m, 0) <= now] or [model]
+        for i, candidate in enumerate(candidates):
+            body["model"] = candidate
+            try:
+                resp = self._request("POST", "/chat/completions", json=body)
+                break
+            except TranslatorError as exc:
+                if not exc.overloaded or i == len(candidates) - 1:
+                    raise
+                self._busy_until[candidate] = time.monotonic() + OVERLOAD_SKIP_S
+                log.warning("%s: %s is overloaded, trying %s", self.name, candidate, candidates[i + 1])
         return resp["choices"][0]["message"]["content"] or "", resp.get("usage") or {}
 
     def _request(self, method: str, path: str, **kwargs) -> dict:
-        """Waits out short rate limits; turns cloud API errors into messages a user can act on."""
-        for attempt in range(len(RATE_LIMIT_WAITS) + 1):
+        """Waits out short rate limits and overloads; turns cloud API errors into messages a user can act on."""
+        attempt = 0
+        while True:
             resp = self.client.request(method, path, **kwargs)
-            if resp.status_code != 429 or attempt == len(RATE_LIMIT_WAITS):
+            waits = RATE_LIMIT_WAITS if resp.status_code == 429 else OVERLOAD_WAITS if resp.status_code in OVERLOAD_CODES else ()
+            if not self.vision or attempt >= len(waits):
                 break
-            wait = _retry_after(resp) or RATE_LIMIT_WAITS[attempt]
-            log.info("%s: too many requests, waiting %.0fs", self.name, wait)
+            wait = _retry_after(resp) or waits[attempt]
+            log.info("%s: HTTP %d, retrying in %.0fs", self.name, resp.status_code, wait)
             time.sleep(wait)
+            attempt += 1
         if resp.is_success:
             return resp.json()
         if not self.vision:
             resp.raise_for_status()
         detail = _error_message(resp)
+        if resp.status_code in OVERLOAD_CODES:
+            raise TranslatorError(f"{self.name} перегружен, попробуйте позже ({detail})", overloaded=True)
         if resp.status_code == 429:
             raise TranslatorError(f"Лимит {self.name} исчерпан, попробуйте позже ({detail})")
         if resp.status_code in (400, 401, 403) and "key" in detail.lower():
