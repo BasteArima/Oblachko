@@ -91,7 +91,9 @@ RATE_LIMIT_WAITS = (5.0, 15.0, 30.0)
 # "Model overloaded" and other server-side failures: a short retry, then the next model
 OVERLOAD_CODES = (500, 502, 503, 504)
 OVERLOAD_WAITS = (2.0, 5.0)
-OVERLOAD_SKIP_S = 180.0
+MODEL_SKIP_S = 180.0
+# A model that refuses a thinking level gets the next one
+THINKING_FALLBACK = {"none": "minimal", "minimal": "low"}
 # Tried in this order when the chosen Gemini model is overloaded
 GEMINI_MODELS = ("gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.8-flash", "gemini-3.5-flash")
 
@@ -99,9 +101,10 @@ GEMINI_MODELS = ("gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.8-f
 class TranslatorError(RuntimeError):
     """A failure worth showing to the user as it is (bad API key, quota used up)."""
 
-    def __init__(self, message: str, overloaded: bool = False):
+    def __init__(self, message: str, model_specific: bool = False):
         super().__init__(message)
-        self.overloaded = overloaded
+        # Another model may well succeed (this one is overloaded or refuses the request)
+        self.model_specific = model_specific
 
 
 def _not_russian(src: str, dst: str) -> bool:
@@ -168,6 +171,7 @@ class Translator:
         self.name = name
         self.fallback_models: tuple[str, ...] = ()
         self._busy_until: dict[str, float] = {}
+        self._effort: dict[str, str] = {}
         self._checked_at = 0.0
 
     @classmethod
@@ -265,23 +269,40 @@ class Translator:
                 "json_schema": {"name": "page_translation", "strict": True, "schema": RESPONSE_SCHEMA},
             },
         }
-        if self.reasoning_effort:
-            body["reasoning_effort"] = self.reasoning_effort
-        # A cloud model that is overloaded ("503 high demand") hands the page to the next one; it is
-        # skipped for a while after that, so every page doesn't wait for it first
+        # A cloud model that fails on its own (overloaded with "503 high demand", doesn't take the request)
+        # hands the page to the next one; it is skipped for a while after that, so every page doesn't
+        # wait for it first. A bad key or a used-up quota fails the same way on every model: no point
         now = time.monotonic()
         candidates = [m for m in (model, *self.fallback_models) if self._busy_until.get(m, 0) <= now] or [model]
         for i, candidate in enumerate(candidates):
             body["model"] = candidate
             try:
-                resp = self._request("POST", "/chat/completions", json=body)
+                resp = self._request_model(candidate, body)
                 break
             except TranslatorError as exc:
-                if not exc.overloaded or i == len(candidates) - 1:
+                if not exc.model_specific or i == len(candidates) - 1:
                     raise
-                self._busy_until[candidate] = time.monotonic() + OVERLOAD_SKIP_S
-                log.warning("%s: %s is overloaded, trying %s", self.name, candidate, candidates[i + 1])
+                self._busy_until[candidate] = time.monotonic() + MODEL_SKIP_S
+                log.warning("%s: %s failed (%s), trying %s", self.name, candidate, exc, candidates[i + 1])
         return resp["choices"][0]["message"]["content"] or "", resp.get("usage") or {}
+
+    def _request_model(self, model: str, body: dict) -> dict:
+        """Models differ in the thinking levels they take: "minimal" is refused by some Gemini models,
+        which then get the next level up from now on."""
+        while True:
+            effort = self._effort.get(model, self.reasoning_effort)
+            if effort:
+                body["reasoning_effort"] = effort
+            else:
+                body.pop("reasoning_effort", None)
+            try:
+                return self._request("POST", "/chat/completions", json=body)
+            except TranslatorError as exc:
+                lower = THINKING_FALLBACK.get(effort) if "thinking" in str(exc).lower() else None
+                if lower is None:
+                    raise
+                log.info("%s: %s doesn't take reasoning_effort=%s, using %s", self.name, model, effort, lower)
+                self._effort[model] = lower
 
     def _request(self, method: str, path: str, **kwargs) -> dict:
         """Waits out short rate limits and overloads; turns cloud API errors into messages a user can act on."""
@@ -301,14 +322,14 @@ class Translator:
             resp.raise_for_status()
         detail = _error_message(resp)
         if resp.status_code in OVERLOAD_CODES:
-            raise TranslatorError(f"{self.name} перегружен, попробуйте позже ({detail})", overloaded=True)
+            raise TranslatorError(f"{self.name} перегружен, попробуйте позже ({detail})", model_specific=True)
         if resp.status_code == 429:
             raise TranslatorError(f"Лимит {self.name} исчерпан, попробуйте позже ({detail})")
         if resp.status_code in (400, 401, 403) and "key" in detail.lower():
             raise TranslatorError(f"{self.name}: ключ не подходит ({detail})")
         if resp.status_code in (400, 403) and "location" in detail.lower():
             raise TranslatorError(f"{self.name} недоступен из вашей страны, нужен VPN ({detail})")
-        raise TranslatorError(f"{self.name}: HTTP {resp.status_code} {detail}")
+        raise TranslatorError(f"{self.name}: HTTP {resp.status_code} {detail}", model_specific=True)
 
     @staticmethod
     def _parse(raw: str, lines: list[str]) -> tuple[list[str], list[tuple[str, str]]]:
