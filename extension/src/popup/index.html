@@ -39,6 +39,31 @@
 
     <p id="unsupported" class="hint" hidden>На этой странице расширение не работает.</p>
 
+    <section id="translator">
+      <label class="field">
+        <span>Переводчик</span>
+        <select id="backend">
+          <option value="local">Локальная модель (LM Studio)</option>
+          <option value="gemini">Gemini API (облако)</option>
+        </select>
+      </label>
+      <div id="gemini" class="gemini" hidden>
+        <label class="field">
+          <span>Ключ API</span>
+          <input id="gemini-key" type="password" autocomplete="off" spellcheck="false" placeholder="AIza…" />
+        </label>
+        <label class="field">
+          <span>Модель</span>
+          <select id="gemini-model"></select>
+        </label>
+        <p class="hint">
+          Ключ бесплатно выдаёт <a href="https://aistudio.google.com/apikey" target="_blank">Google AI Studio</a>.
+          Модель видит страницу целиком, видеокарта нужна только для поиска текста. Бесплатные запросы
+          ограничены в минуту и в день, а страницы на бесплатном тарифе Google может использовать для обучения.
+        </p>
+      </div>
+    </section>
+
     <details id="glossary" hidden>
       <summary>Имена в этом тайтле <span id="glossary-count" class="count"></span></summary>
       <p class="hint">Переводчик запоминает имена сам. Исправьте неудачные, и страницы переведутся заново.</p>

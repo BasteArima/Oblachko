@@ -4,7 +4,7 @@
  * images; the service worker can, thanks to host_permissions.
  */
 import type { CaptureResponse, HealthResponse, Message, TabStatus, TranslateRequest, TranslateResponse } from '../shared/messages';
-import { loadSettings } from '../shared/settings';
+import { loadSettings, translatorHeaders } from '../shared/settings';
 import { compareVersions } from '../shared/version';
 
 /** chrome.tabs.captureVisibleTab allows 2 calls per second. */
@@ -57,7 +57,7 @@ async function translate(req: TranslateRequest): Promise<TranslateResponse> {
 
   let resp: Response;
   try {
-    resp = await serverFetch(`${serverUrl}/translate`, { method: 'POST', body: form });
+    resp = await serverFetch(`${serverUrl}/translate`, { method: 'POST', body: form, headers: await translatorHeaders() });
   } catch {
     throw new Error(`Сервер Oblachko не отвечает (${serverUrl}). Он запущен?`);
   }
@@ -171,7 +171,7 @@ async function health(): Promise<HealthResponse> {
   try {
     // Generous timeout: a PC busy with OCR and the LLM can be slow to answer. One retry only, so the
     // popup doesn't hang when the server really is off
-    const resp = await serverFetch(`${serverUrl}/health`, { signal: AbortSignal.timeout(10000) }, [500]);
+    const resp = await serverFetch(`${serverUrl}/health`, { signal: AbortSignal.timeout(10000), headers: await translatorHeaders() }, [500]);
     result = resp.ok ? await resp.json() : { ok: false, error: `HTTP ${resp.status}` };
   } catch {
     return { ok: false, error: `Сервер не отвечает (${serverUrl})` };

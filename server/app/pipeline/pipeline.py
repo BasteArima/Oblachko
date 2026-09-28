@@ -36,6 +36,10 @@ SFX_MAX_LETTERS = 12
 SFX_LETTER_SIZE = 0.06
 # Page-wide OCR lines below this recognition score are mostly logos and texture ("ODBV" on a T-shirt)
 PAGE_OCR_MIN_SCORE = 0.9
+# The page as a vision model sees it: bubbles stay legible, a webtoon strip stays within a few thousand tokens
+VISION_MAX_WIDTH = 1600
+VISION_MAX_HEIGHT = 4096
+VISION_JPEG_QUALITY = 85
 
 
 @dataclass
@@ -60,6 +64,23 @@ def is_raster_image(data: bytes) -> bool:
         return True
     except Exception:  # noqa: BLE001 - Pillow raises a zoo of types for garbage input
         return False
+
+
+def _vision_jpeg(img_rgb: np.ndarray) -> bytes:
+    h, w = img_rgb.shape[:2]
+    scale = min(1.0, VISION_MAX_WIDTH / w, VISION_MAX_HEIGHT / h)
+    im = Image.fromarray(img_rgb)
+    if scale < 1.0:
+        im = im.resize((max(1, round(w * scale)), max(1, round(h * scale))), Image.LANCZOS)
+    buf = io.BytesIO()
+    im.save(buf, "JPEG", quality=VISION_JPEG_QUALITY)
+    return buf.getvalue()
+
+
+def _box_1000(bbox: tuple[int, int, int, int], w: int, h: int) -> list[int]:
+    """x, y, w, h in pixels -> [ymin, xmin, ymax, xmax] on the 0-1000 scale Gemini is trained on."""
+    x, y, bw, bh = bbox
+    return [round(y * 1000 / h), round(x * 1000 / w), round((y + bh) * 1000 / h), round((x + bw) * 1000 / w)]
 
 
 def decode_image(data: bytes) -> np.ndarray:
@@ -107,8 +128,11 @@ class Pipeline:
         lang: str = "auto",
         context: list[tuple[str, str]] = (),
         glossary: Callable[[list[str]], list[tuple[str, str]]] | None = None,
+        translator: Translator | None = None,
     ) -> dict:
-        """glossary: returns the known (source, russian) names that occur in the given page lines."""
+        """glossary: returns the known (source, russian) names that occur in the given page lines.
+        translator: the local LLM from the settings when None."""
+        translator = translator or self.translator
         timings: dict[str, float] = {}
         h, w = img_rgb.shape[:2]
 
@@ -154,7 +178,11 @@ class Pipeline:
         t = time.perf_counter()
         lines = [blk.src for blk in blocks]
         known_names = glossary(lines) if glossary and lines else []
-        result = self.translator.translate(lines, context, known_names)
+        if translator.vision and lines:
+            boxes = [_box_1000(blk.text_bbox, w, h) for blk in blocks]
+            result = translator.translate(lines, context, known_names, _vision_jpeg(img_rgb), boxes)
+        else:
+            result = translator.translate(lines, context, known_names)
         for blk, dst in zip(blocks, result.texts):
             blk.dst = _sentence_case(dst) if dst.isupper() else dst
         timings["translate"] = time.perf_counter() - t

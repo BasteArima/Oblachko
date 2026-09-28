@@ -2,6 +2,7 @@
 
 POST /translate  multipart: image (file), lang (auto|ja|en), context_key (chapter), title_key, priority (0 = on screen)
 GET  /health     server, model and queue status
+Both take the translator from headers: X-Oblachko-Backend (local|gemini), X-Oblachko-Key, X-Oblachko-Model
 GET  /glossary?title=...  names known for a title
 PUT  /glossary   {"title": ..., "entries": [{"src": ..., "dst": ...}]}  replace with the user's edits
 POST /cache/clear
@@ -16,7 +17,7 @@ from contextlib import asynccontextmanager
 from dataclasses import asdict
 
 import httpx
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -24,12 +25,14 @@ from .cache import ResultCache
 from .config import SERVER_DIR, VERSION, load_settings
 from .glossary import Glossary
 from .pipeline.pipeline import Pipeline, is_raster_image
+from .pipeline.translate import Translator, TranslatorError
 from .worker import Worker
 
 log = logging.getLogger("oblachko")
 
 MAX_IMAGE_BYTES = 30 * 1024 * 1024
 LANGS = {"auto", "ja", "en"}
+GEMINI_MODELS = {"gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.8-flash", "gemini-3.5-flash"}
 
 settings = load_settings()
 state: dict = {}
@@ -55,14 +58,40 @@ app = FastAPI(title="Oblachko", version=VERSION, lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origin_regex=r"chrome-extension://.*", allow_methods=["*"], allow_headers=["*"])
 
 
-@app.get("/health")
-async def health() -> dict:
+_cloud_translators: dict[tuple[str, str], Translator] = {}
+
+
+def pick_translator(backend: str | None, key: str | None, model: str | None) -> Translator:
+    """The local LLM from config.toml, or a Gemini client for the user's key (kept for the next requests)."""
     worker: Worker = state["worker"]
-    translator = worker.pipeline.translator
-    llm = {"url": settings.llm_base_url, "ok": False, "model": translator.model or None}
+    if not backend or backend == "local":
+        return worker.pipeline.translator
+    if backend != "gemini":
+        raise HTTPException(400, f"unknown translator {backend!r}")
+    if not key:
+        raise HTTPException(400, "Не задан ключ Gemini API: впишите его в попапе Oblachko")
+    model = model if model in GEMINI_MODELS else "gemini-3.5-flash-lite"
+    translator = _cloud_translators.get((key, model))
+    if translator is None:
+        translator = _cloud_translators[(key, model)] = Translator.gemini(key, model, settings.llm_temperature)
+    return translator
+
+
+@app.get("/health")
+async def health(
+    x_oblachko_backend: str | None = Header(None),
+    x_oblachko_key: str | None = Header(None),
+    x_oblachko_model: str | None = Header(None),
+) -> dict:
+    worker: Worker = state["worker"]
+    llm: dict = {"url": settings.llm_base_url, "ok": False, "model": None}
     try:
-        llm["model"] = await asyncio.to_thread(translator.resolve_model)
+        translator = pick_translator(x_oblachko_backend, x_oblachko_key, x_oblachko_model)
+        llm["url"], llm["model"], llm["name"] = translator.base_url, translator.model or None, translator.name
+        llm["model"] = await asyncio.to_thread(translator.check)
         llm["ok"] = True
+    except HTTPException as exc:
+        llm["error"] = exc.detail
     except (httpx.HTTPError, RuntimeError) as exc:
         llm["error"] = str(exc)
     return {"ok": True, "version": VERSION, "device": worker.pipeline.detector.provider, "queue": worker.pending, "llm": llm}
@@ -75,6 +104,9 @@ async def translate(
     context_key: str = Form(""),
     title_key: str = Form(""),
     priority: int = Form(1),
+    x_oblachko_backend: str | None = Header(None),
+    x_oblachko_key: str | None = Header(None),
+    x_oblachko_model: str | None = Header(None),
 ) -> dict:
     if lang not in LANGS:
         raise HTTPException(400, f"lang must be one of {sorted(LANGS)}")
@@ -88,9 +120,12 @@ async def translate(
         raise HTTPException(415, "not a raster image")
 
     worker: Worker = state["worker"]
+    translator = pick_translator(x_oblachko_backend, x_oblachko_key, x_oblachko_model)
     try:
-        future, cached = worker.submit(data, lang, context_key, title_key, priority)
+        future, cached = worker.submit(data, lang, context_key, title_key, priority, translator)
         result = await asyncio.wrap_future(future)
+    except TranslatorError as exc:
+        raise HTTPException(503, str(exc)) from exc
     except httpx.HTTPError as exc:
         raise HTTPException(503, f"LLM request failed: {exc}") from exc
     except RuntimeError as exc:

@@ -91,6 +91,7 @@ section {
 
 select,
 input[type='url'],
+input[type='password'],
 button {
   box-sizing: border-box;
   padding: 5px 8px;
@@ -219,4 +220,17 @@ details .hint {
 
 .spacer {
   flex: 1;
+}
+
+.gemini {
+  display: grid;
+  gap: 10px;
+}
+
+.gemini[hidden] {
+  display: none;
+}
+
+a {
+  color: var(--accent);
 }

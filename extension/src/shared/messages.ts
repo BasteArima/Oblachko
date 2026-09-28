@@ -101,5 +101,5 @@ export interface HealthResponse {
   version?: string;
   device?: string;
   queue?: number;
-  llm?: { url: string; ok: boolean; model: string | null; error?: string };
+  llm?: { url: string; ok: boolean; model: string | null; name?: string; error?: string };
 }
