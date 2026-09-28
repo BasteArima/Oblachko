@@ -21,8 +21,9 @@ from .translate import Translator
 
 # Scanlator watermarks like "RawLazy.Com" or "DL-Raw.Se"
 _WATERMARK_RE = re.compile(r"^[\w\-]+\.(com|net|org|se|to|zone|io|me|info|site|xyz|cc|co)$", re.IGNORECASE)
-# Lines with nothing to translate ("!?", "…", "!!")
-_PUNCT_ONLY_RE = re.compile(r"^[\s!?！？.。…・\-ー~〜、,]+$")
+# Blocks with nothing to translate ("!?", "…", "!!"): the original already reads fine in Russian, and
+# face details and hatching the detector mistakes for text tend to OCR as exactly this ("〜〜〜")
+_PUNCT_ONLY_RE = re.compile(r"^[\s!?！？.。．…‥・\-ー~〜～、,]+$")
 
 OCR_PAD = 6
 
@@ -104,7 +105,7 @@ class Pipeline:
             else:
                 block_lang, text = lang, (self.ocr_ja() if lang == "ja" else self.ocr_en())(crop)
             seen[block_lang] += 1
-            if not text or self._is_watermark(crop, text, block_lang, b):
+            if not text or _PUNCT_ONLY_RE.match(text) or self._is_watermark(crop, text, block_lang, b):
                 continue
             read.append((b, block_lang, text))
         timings["ocr"] = time.perf_counter() - t
@@ -121,16 +122,10 @@ class Pipeline:
             blocks.append(Block(len(blocks), (b.x1, b.y1, b.w, b.h), area, block_lang, vertical, bg, fg, text, text))
 
         t = time.perf_counter()
-        to_translate = []
-        for blk in blocks:
-            if _PUNCT_ONLY_RE.match(blk.src):
-                blk.dst = unicodedata.normalize("NFKC", blk.src)  # "！？" -> "!?", fonts rarely have full-width glyphs
-            else:
-                to_translate.append(blk)
-        lines = [blk.src for blk in to_translate]
+        lines = [blk.src for blk in blocks]
         known_names = glossary(lines) if glossary and lines else []
         result = self.translator.translate(lines, context, known_names)
-        for blk, dst in zip(to_translate, result.texts):
+        for blk, dst in zip(blocks, result.texts):
             blk.dst = _sentence_case(dst) if dst.isupper() else dst
         timings["translate"] = time.perf_counter() - t
 

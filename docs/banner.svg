@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="360" viewBox="0 0 1280 360" role="img" aria-label="Oblachko: перевод манги прямо в браузере">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5b6ee1"/>
+      <stop offset="1" stop-color="#8f5be1"/>
+    </linearGradient>
+    <pattern id="tone" width="18" height="18" patternUnits="userSpaceOnUse">
+      <circle cx="4" cy="4" r="2.2" fill="#ffffff" fill-opacity="0.12"/>
+      <circle cx="13" cy="13" r="2.2" fill="#ffffff" fill-opacity="0.12"/>
+    </pattern>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#1c1450" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <rect width="1280" height="360" rx="28" fill="url(#bg)"/>
+  <rect width="1280" height="360" rx="28" fill="url(#tone)"/>
+
+  <!-- speed lines -->
+  <g stroke="#ffffff" stroke-opacity="0.18" stroke-width="4" stroke-linecap="round">
+    <line x1="40" y1="60" x2="150" y2="110"/>
+    <line x1="30" y1="180" x2="140" y2="182"/>
+    <line x1="40" y1="300" x2="150" y2="252"/>
+  </g>
+
+  <!-- mascot: a speech-bubble cloud -->
+  <g transform="translate(290 178)" filter="url(#shadow)">
+    <g fill="#1e1b3a">
+      <circle cx="-95" cy="10" r="75"/><circle cx="-40" cy="-45" r="85"/><circle cx="40" cy="-50" r="83"/>
+      <circle cx="100" cy="5" r="73"/><circle cx="50" cy="55" r="77"/><circle cx="-45" cy="55" r="77"/>
+      <path d="M-60 90 L-112 170 L-8 110 Z"/>
+    </g>
+    <g fill="#ffffff">
+      <circle cx="-95" cy="10" r="70"/><circle cx="-40" cy="-45" r="80"/><circle cx="40" cy="-50" r="78"/>
+      <circle cx="100" cy="5" r="68"/><circle cx="50" cy="55" r="72"/><circle cx="-45" cy="55" r="72"/>
+      <path d="M-55 95 L-100 160 L-16 112 Z"/>
+    </g>
+    <g fill="#1e1b3a">
+      <ellipse cx="-38" cy="-5" rx="15" ry="22"/><ellipse cx="38" cy="-5" rx="15" ry="22"/>
+      <path d="M-26 18 A26 26 0 0 0 26 18 Z"/>
+    </g>
+    <g fill="#ffffff">
+      <circle cx="-44" cy="-14" r="6"/><circle cx="32" cy="-14" r="6"/>
+    </g>
+    <g fill="#ffbccb">
+      <ellipse cx="-72" cy="30" rx="18" ry="9"/><ellipse cx="72" cy="30" rx="18" ry="9"/>
+    </g>
+  </g>
+
+  <!-- sparkles -->
+  <g fill="#ffe27a">
+    <path d="M455 52 l7 20 20 7 -20 7 -7 20 -7 -20 -20 -7 20 -7 z"/>
+    <path d="M150 300 l5 14 14 5 -14 5 -5 14 -5 -14 -14 -5 14 -5 z"/>
+    <path d="M1210 290 l6 16 16 6 -16 6 -6 16 -6 -16 -16 -6 16 -6 z"/>
+  </g>
+
+  <!-- title -->
+  <g font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" fill="#ffffff">
+    <text x="490" y="170" font-size="96" font-weight="800" letter-spacing="1">Oblachko</text>
+    <text x="494" y="220" font-size="29" font-weight="600" fill-opacity="0.95">Перевод манги прямо в браузере</text>
+    <text x="494" y="258" font-size="21" fill-opacity="0.8">японский, английский → русский · всё локально</text>
+  </g>
+
+  <!-- 吹き出し → облачко -->
+  <g font-family="'Yu Gothic', 'Meiryo', 'Segoe UI', sans-serif" font-weight="700">
+    <g transform="translate(1145 80)">
+      <ellipse cx="0" cy="0" rx="84" ry="36" fill="#ffffff"/>
+      <path d="M-38 28 L-58 56 L-12 34 Z" fill="#ffffff"/>
+      <text x="0" y="10" font-size="28" fill="#1e1b3a" text-anchor="middle">吹き出し</text>
+    </g>
+    <path d="M1145 130 q18 26 0 52" stroke="#ffffff" stroke-width="5" fill="none" stroke-linecap="round"/>
+    <path d="M1133 172 l12 14 12 -16" stroke="#ffffff" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <g transform="translate(1145 232)">
+      <ellipse cx="0" cy="0" rx="84" ry="36" fill="#ffffff"/>
+      <path d="M38 28 L58 56 L12 34 Z" fill="#ffffff"/>
+      <text x="0" y="10" font-size="28" fill="#5b6ee1" text-anchor="middle" font-family="'Comic Sans MS', 'Segoe UI', sans-serif">облачко</text>
+    </g>
+  </g>
+</svg>

@@ -1,85 +1,145 @@
-# Oblachko
+<p align="center">
+  <img src="docs/banner.svg" alt="Oblachko: перевод манги прямо в браузере" width="100%">
+</p>
 
-Chrome extension that translates manga pages right in the browser: it finds speech bubbles, reads the text and draws a Russian translation over them. Everything runs locally: text detection and OCR on your GPU, translation through a local LLM (LM Studio, Ollama or any OpenAI-compatible server).
+<p align="center">
+  <a href="https://github.com/BasteArima/Oblachko/releases/latest"><img src="https://img.shields.io/github/v/release/BasteArima/Oblachko?label=%D0%B2%D0%B5%D1%80%D1%81%D0%B8%D1%8F&color=5b6ee1" alt="Последняя версия"></a>
+  <img src="https://img.shields.io/badge/Chrome-Manifest%20V3-4285F4?logo=googlechrome&logoColor=white" alt="Chrome MV3">
+  <img src="https://img.shields.io/badge/Windows-NVIDIA%20GPU-76B900?logo=nvidia&logoColor=white" alt="Windows + NVIDIA">
+  <img src="https://img.shields.io/badge/LLM-LM%20Studio-8f5be1" alt="LM Studio">
+</p>
 
-Source languages: Japanese, English. Target: Russian.
+<p align="center">
+  <b>Расширение для Chrome, которое переводит мангу прямо на странице.</b><br>
+  Находит облачка с репликами, распознаёт японский или английский текст и вписывает на его место русский перевод.<br>
+  Всё работает у вас на компьютере: никаких облачных сервисов, лимитов и подписок.
+</p>
 
-## How it works
+<p align="center">
+  <img src="docs/demo.png" alt="Страница до и после перевода" width="92%">
+</p>
+
+<p align="center"><sub>Демо-страница нарисована специально для README; перевод и раскладка текста получены настоящим Oblachko.</sub></p>
+
+## ✨ Возможности
+
+- **Сама страница, а не отдельное окно.** Перевод ложится поверх облачков, шрифт подбирается под размер облачка. Зажмите <kbd>Alt</kbd>, чтобы подсмотреть оригинал.
+- **Читает наперёд.** Страница на экране переводится первой, следующие переводятся заранее, пока вы читаете. Повторное открытие главы мгновенное: переводы кэшируются.
+- **Помнит персонажей.** Имена запоминаются для каждого тайтла, так что героиня не превращается из «Наоко» в «Нако» через страницу. Неудачное имя можно исправить в попапе, и страница переведётся заново.
+- **Работает почти везде.** Обычные `<img>`, читалки на `<canvas>`, страницы в CSS-фоне, CDN с защитой от хотлинка, длинные ленты вебтунов. Если картинку нельзя прочитать, страница вырезается из снимка вкладки.
+- **Японский и английский.** Вертикальный текст, фуригана, английский капс, водяные знаки сканлейтеров отбрасываются.
+- **Обновляется сама.** `start.bat` при запуске скачивает новую версию и обновляет и сервер, и расширение.
+
+## 🧩 Как это работает
+
+```mermaid
+flowchart LR
+    subgraph Chrome
+        P[Страница с мангой] --> E[Расширение Oblachko]
+    end
+    subgraph S[Локальный сервер]
+        D[Поиск текста<br/>comic-text-detector] --> O[OCR<br/>manga-ocr / RapidOCR] --> T[Перевод страницы<br/>одним запросом]
+    end
+    E -- картинка --> D
+    T -- промпт + глоссарий --> L[LM Studio<br/>локальная LLM]
+    L -- перевод --> T
+    T -- облачка, цвета, перевод --> E
+    E --> R[Перевод поверх облачков]
+```
+
+Расширение отправляет страницу на локальный сервер. Сервер находит блоки текста, распознаёт их, собирает реплики в порядке чтения и переводит всю страницу одним запросом к модели в LM Studio: так модель видит контекст диалога, предыдущую страницу и глоссарий имён. Расширение рисует ответ поверх картинки, не трогая вёрстку сайта.
+
+## 🚀 Установка
+
+**Нужно:** Windows, видеокарта NVIDIA от 8 ГБ, Google Chrome, [LM Studio](https://lmstudio.ai).
+
+1. **uv** (ставит Python и библиотеки сам). Один раз в PowerShell:
+   ```powershell
+   powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+   ```
+2. **Oblachko.** Скачайте `Oblachko-vX.Y.Z.zip` из [последнего релиза](https://github.com/BasteArima/Oblachko/releases/latest) и распакуйте в постоянное место, например `C:\Oblachko`.
+3. **LM Studio.** Скачайте модель, на вкладке *Developer* загрузите её с контекстом 4096 и нажмите *Start Server*.
+4. **Сервер.** Запустите `start.bat`. Первый раз он скачает всё нужное (несколько ГБ, 5–15 минут). Готово, когда в окне появится `Uvicorn running on http://127.0.0.1:8765`.
+5. **Расширение.** `chrome://extensions` → включите «Режим разработчика» → «Загрузить распакованное расширение» → папка `extension` внутри Oblachko.
+
+Дальше каждый раз: LM Studio с сервером, `start.bat`, глава манги, иконка Oblachko → «Переводить на этом сайте».
+
+Если LM Studio слушает не порт 1234, поменяйте `llm_base_url` в `server\config.toml`.
+
+### Какую модель взять
+
+| Видеопамять | Модель | Заметки |
+|---|---|---|
+| 8 ГБ | Qwen 3.5 9B, Q4 (~6 ГБ) | Контекст 4096. Сам Oblachko занимает ~0,8 ГБ, Windows и Chrome ~1 ГБ. |
+| 8 ГБ | Gemma 4 12B QAT (~6,7 ГБ) | Лучше переводит, но пару слоёв придётся выгрузить на процессор в LM Studio: медленнее. |
+| 12 ГБ и больше | Gemma 4 12B QAT | Рекомендуется. 1–3 секунды на страницу. |
+
+## 🎛 Использование
+
+| Где | Что |
+|---|---|
+| Иконка на панели | Включить перевод на сайте, выбрать язык оригинала, статус сервера и модели |
+| <kbd>Alt</kbd> (зажать) | Показать оригинал |
+| Попап → «Имена в этом тайтле» | Исправить имена персонажей; страница переведётся заново |
+| Попап → «Повторить» | Перевести заново страницы с ошибкой |
+| Красный **!** на странице | Наведите курсор: там текст ошибки |
+
+## 🩹 Если что-то не так
+
+| Симптом | Что сделать |
+|---|---|
+| «Сервер не отвечает» | Запустите `start.bat` и не закрывайте его окно |
+| «LLM недоступна» | Запустите сервер в LM Studio; проверьте порт в `server\config.toml` |
+| Перевод не появляется | Включите «Переводить на этом сайте» в попапе; посмотрите ошибку там же |
+| «Покажите страницу целиком» | Сайт не отдаёт картинку, и страница снимается со скриншота: прокрутите так, чтобы она была видна вся |
+| Имя переведено странно | Попап → «Имена в этом тайтле», исправьте и сохраните |
+
+## 🛠 Для разработчиков
 
 ```
-[extension] finds page images ──► [local server] detect text blocks (comic-text-detector)
-                                                 OCR (manga-ocr for JP, RapidOCR for EN)
-                                                 translate the whole page in one LLM request
-[extension] draws the translation ◄── JSON: block boxes, colours, source and translated text
-            over each bubble
+extension/   расширение Chrome (TypeScript, Vite, CRXJS)
+  src/background/   service worker: связь с сервером, Referer, снимки вкладки, автообновление
+  src/content/      поиск страниц, очередь, отрисовка перевода
+  src/popup/        попап: настройки сайта, глоссарий, ошибки
+server/      локальный сервер (Python, FastAPI)
+  app/pipeline/     детектор, OCR, облачка, перевод
+  app/worker.py     очередь на GPU, кэш, контекст главы, глоссарий
+  update.py         самообновление из релизов GitHub
+tools/       сборка релиза, демо-картинка для README
+start.bat    запуск для пользователей
+VERSION      единая версия сервера и расширения
 ```
 
-- The page on screen is translated first, the next pages are prefetched while you read.
-- Results are cached by image hash: re-opening a chapter is instant.
-- Pages of a chapter share context; names are kept in a per-title glossary so a character keeps one Russian name. The glossary can be edited in the popup.
-- Works with `<img>`, `<canvas>` and CSS `background-image` readers, anti-hotlink CDNs (Referer is set), webtoon strips; when pixels can't be read, the page is cropped from a tab screenshot.
+**Сервер:**
 
-## 1. LM Studio
+```bash
+cd server
+uv sync
+uv run python -m app                               # http://127.0.0.1:8765
+uv run python scripts/bench.py "../test_pages/ja/*.webp"   # замеры и отладочные картинки
+```
 
-1. Download a model. Tested: `google/gemma-4-12b-qat` (best quality), `qwen3.5-9b` (smaller, weaker).
-2. Developer tab: load the model and start the server. Note the port it shows (default 1234).
+**Расширение:**
 
-### 8 GB VRAM
+```bash
+cd extension
+npm install
+npm run dev     # пересборка при изменениях; затем ↻ в chrome://extensions
+npm run build
+```
 
-The server takes about 0.8 GB of VRAM (detector and OCR in fp16). Windows and Chrome take roughly another 1 GB, which leaves ~6 GB for the LLM:
-
-- load the model with a small context (4096 is plenty: one page is ~1000 tokens);
-- a 9B model at Q4 (~6 GB) fits; a 12B model at Q4 (~6.7 GB) needs a couple of layers offloaded to the CPU in LM Studio, which costs some speed.
-
-## For users: release archive
-
-Download `Oblachko-vX.Y.Z.zip` from [Releases](https://github.com/BasteArima/Oblachko/releases), unpack it somewhere permanent and follow `ИНСТРУКЦИЯ.txt`: install [uv](https://docs.astral.sh/uv/) once, run `start.bat`, load the `extension` folder in Chrome once. Every `start.bat` launch checks for a new release and updates the server and the extension in place (settings, models and the glossary are kept); the extension notices the new version and reloads itself.
-
-## Publishing a release
-
-Bump `VERSION` (the single version of the server and the extension), commit, then push a matching tag:
+**Релиз.** Поднимите номер в `VERSION`, закоммитьте и запушьте тег с тем же номером:
 
 ```bash
 git tag v0.2.0
 git push origin v0.2.0
 ```
 
-GitHub Actions builds the extension and attaches the archive from `tools/package.py` to the release. To build the archive locally: `npm run build` in `extension/`, then `python tools/package.py`.
+GitHub Actions соберёт расширение и выложит архив из `tools/package.py`; у пользователей он подтянется при следующем запуске `start.bat`. Демо-картинку для README пересобирает `tools/make_demo.py` (нужны запущенные сервер и LM Studio).
 
-## 2. Server (development)
+## 🙏 Спасибо
 
-Windows: install [uv](https://docs.astral.sh/uv/) once, then run `start.bat` in the repo root (in a git checkout it skips self-update). The first run downloads the text detector (~95 MB), the Python packages (a few GB, mostly PyTorch) and the OCR model (~450 MB); later runs start in seconds. If LM Studio doesn't use port 1234, set `llm_base_url` in `server/config.toml`.
-
-Manually:
-
-```bash
-cd server
-uv sync
-curl -L -o models/comictextdetector.pt.onnx https://github.com/zyddnys/manga-image-translator/releases/download/beta-0.3/comictextdetector.pt.onnx
-cp config.example.toml config.toml   # set llm_base_url to the LM Studio port
-uv run python -m app
-```
-
-The server listens on `http://127.0.0.1:8765`.
-
-Benchmark on local test pages (side-by-side debug images go to `server/bench_out/`):
-
-```bash
-uv run python scripts/bench.py "../test_pages/ja/*.webp"
-```
-
-## 3. Extension
-
-```bash
-cd extension
-npm install
-npm run build
-```
-
-Chrome → `chrome://extensions` → enable Developer mode → **Load unpacked** → pick `extension/dist`.
-
-Open a manga chapter, click the Oblachko icon and enable **Переводить на этом сайте**. Hold **Alt** to peek at the original. If a page shows a red **!**, hover it or open the popup to see the error.
-
-For development, `npm run dev` rebuilds on every change; reload the extension on `chrome://extensions` afterwards.
-
-The bundled font is [Comic Relief](https://github.com/loudifier/Comic-Relief) (SIL Open Font License, see `extension/public/fonts/OFL.txt`).
+- [comic-text-detector](https://github.com/dmMaze/comic-text-detector) и модель из [manga-image-translator](https://github.com/zyddnys/manga-image-translator): поиск текста
+- [manga-ocr](https://github.com/kha-white/manga-ocr): японский OCR
+- [RapidOCR](https://github.com/RapidAI/RapidOCR): английский OCR
+- [Comic Relief](https://github.com/loudifier/Comic-Relief): шрифт перевода (SIL Open Font License, `extension/public/fonts/OFL.txt`)

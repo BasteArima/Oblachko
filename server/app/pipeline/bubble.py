@@ -15,7 +15,9 @@ _KERNEL = np.ones((5, 5), np.uint8)
 # How far around the text box we look for the bubble edge, relative to the box's larger side
 SEARCH_MARGIN = 1.0
 # Largest axis-aligned rectangle inside an ellipse is ~0.71 of its box; bubbles are usually rounder-rect
-INNER_RATIO = 0.8
+INNER_RATIO = 0.85
+# Percent of the bubble's pixels ignored on each side when measuring it (cuts off the tail)
+TAIL_CUT = 2
 BG_TOLERANCE = 40
 
 
@@ -52,10 +54,17 @@ def find_bubble(
     if touches_edge:
         return x1, y1, x2 - x1, y2 - y1
 
+    # Extent from pixel percentiles, not the bounding box: the tail is thin, holds few pixels and
+    # would otherwise stretch the box towards the speaker and shift the text out of the bubble
+    ys, xs = np.nonzero(labels == label)
+    px1, px2 = np.percentile(xs, [TAIL_CUT, 100 - TAIL_CUT])
+    py1, py2 = np.percentile(ys, [TAIL_CUT, 100 - TAIL_CUT])
+    cw, ch = px2 - px1, py2 - py1
+
     # Inner rectangle of the bubble, but never smaller than the original text box
     iw, ih = cw * INNER_RATIO, ch * INNER_RATIO
-    ix1 = rx1 + cx + (cw - iw) / 2
-    iy1 = ry1 + cy + (ch - ih) / 2
+    ix1 = rx1 + px1 + (cw - iw) / 2
+    iy1 = ry1 + py1 + (ch - ih) / 2
     ox1, oy1 = int(min(ix1, x1)), int(min(iy1, y1))
     ox2, oy2 = int(max(ix1 + iw, x2)), int(max(iy1 + ih, y2))
     return ox1, oy1, ox2 - ox1, oy2 - oy1
