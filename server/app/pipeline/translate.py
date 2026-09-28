@@ -90,7 +90,9 @@ RETRY_TEMPERATURES = (0.5, 0.8)
 RATE_LIMIT_WAITS = (5.0, 15.0, 30.0)
 # "Model overloaded" and other server-side failures: a short retry, then the next model
 OVERLOAD_CODES = (500, 502, 503, 504)
-OVERLOAD_WAITS = (2.0, 5.0)
+OVERLOAD_WAITS = (2.0,)
+# A cloud model that hasn't answered in this long is stuck: the next model gets the page
+CLOUD_TIMEOUT = httpx.Timeout(45.0, connect=10.0)
 MODEL_SKIP_S = 180.0
 # A model that refuses a thinking level gets the next one
 THINKING_FALLBACK = {"none": "minimal", "minimal": "low"}
@@ -156,7 +158,7 @@ class Translator:
         model: str = "",
         api_key: str = "local",
         temperature: float = 0.3,
-        timeout: float = 120.0,
+        timeout: float | httpx.Timeout = 120.0,
         reasoning_effort: str = "none",
         vision: bool = False,
         name: str = "LLM",
@@ -177,7 +179,7 @@ class Translator:
     @classmethod
     def gemini(cls, api_key: str, model: str, temperature: float = 0.3) -> Translator:
         # Gemini 3.x can't switch thinking off; "minimal" keeps a page at a couple of seconds
-        translator = cls(GEMINI_BASE_URL, model, api_key, temperature, 90.0, "minimal", vision=True, name="Gemini API")
+        translator = cls(GEMINI_BASE_URL, model, api_key, temperature, CLOUD_TIMEOUT, "minimal", vision=True, name="Gemini API")
         translator.fallback_models = tuple(m for m in GEMINI_MODELS if m != model)
         return translator
 
@@ -308,7 +310,16 @@ class Translator:
         """Waits out short rate limits and overloads; turns cloud API errors into messages a user can act on."""
         attempt = 0
         while True:
-            resp = self.client.request(method, path, **kwargs)
+            try:
+                resp = self.client.request(method, path, **kwargs)
+            except httpx.TimeoutException as exc:
+                if not self.vision:
+                    raise
+                raise TranslatorError(f"{self.name} не ответил вовремя", model_specific=True) from exc
+            except httpx.TransportError as exc:
+                if not self.vision:
+                    raise
+                raise TranslatorError(f"{self.name}: нет связи ({exc.__class__.__name__}). Проверьте интернет или VPN") from exc
             waits = RATE_LIMIT_WAITS if resp.status_code == 429 else OVERLOAD_WAITS if resp.status_code in OVERLOAD_CODES else ()
             if not self.vision or attempt >= len(waits):
                 break
