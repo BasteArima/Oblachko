@@ -1,7 +1,10 @@
 @echo off
 rem Oblachko: updates itself, sets everything up on the first run and starts the server.
+rem System tools are called by full path and uv is looked up in its usual install folders:
+rem when PATH is longer than cmd's 8191-character limit, cmd stops finding any program by name.
 setlocal
-chcp 65001 >nul
+set "SYS=%SystemRoot%\System32"
+"%SYS%\chcp.com" 65001 >nul
 cd /d "%~dp0"
 
 rem The updater can't overwrite a running batch file, it leaves start.bat.new instead.
@@ -12,8 +15,12 @@ if exist start.bat.new (
     "%~f0"
 )
 
-where uv >nul 2>nul
-if errorlevel 1 (
+set "UV="
+for /f "delims=" %%i in ('""%SYS%\where.exe" uv 2>nul"') do if not defined UV set "UV=%%i"
+for %%p in ("%USERPROFILE%\.local\bin\uv.exe" "%USERPROFILE%\.cargo\bin\uv.exe" "%LOCALAPPDATA%\Microsoft\WinGet\Links\uv.exe") do (
+    if not defined UV if exist %%p set "UV=%%~p"
+)
+if not defined UV (
     echo Не найден uv. Установите его командой в PowerShell:
     echo   powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
     echo и запустите start.bat ещё раз.
@@ -21,7 +28,7 @@ if errorlevel 1 (
 )
 
 echo Проверяю обновления...
-uv run --no-project --python 3.12 python server\update.py
+"%UV%" run --no-project --python 3.12 python server\update.py
 if exist start.bat.new (
     copy /y start.bat.new start.bat >nul
     del start.bat.new
@@ -33,7 +40,7 @@ cd server
 if not exist models\comictextdetector.pt.onnx (
     echo Скачиваю детектор текста, около 95 МБ...
     if not exist models mkdir models
-    curl -L --fail -o models\comictextdetector.pt.onnx https://github.com/zyddnys/manga-image-translator/releases/download/beta-0.3/comictextdetector.pt.onnx
+    "%SYS%\curl.exe" -L --fail -o models\comictextdetector.pt.onnx https://github.com/zyddnys/manga-image-translator/releases/download/beta-0.3/comictextdetector.pt.onnx
     if errorlevel 1 goto fail
 )
 
@@ -43,12 +50,12 @@ if not exist config.toml (
 )
 
 echo Проверяю зависимости. В первый раз это займёт несколько минут...
-uv sync
+"%UV%" sync
 if errorlevel 1 goto fail
 
 echo Запускаю сервер. Первый запуск скачает модель OCR, около 450 МБ.
 echo Окно не закрывайте, пока пользуетесь переводом.
-uv run python -m app
+"%UV%" run python -m app
 goto end
 
 :fail

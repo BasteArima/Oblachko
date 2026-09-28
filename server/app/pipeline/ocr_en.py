@@ -20,6 +20,19 @@ class EnglishOcr:
         result = self.engine(np.dstack([bright, bright, bright]), use_det=False, use_cls=False, use_rec=True)
         return result.txts[0] if result.txts else ""
 
+    def page_lines(self, img_rgb: np.ndarray) -> list[tuple[int, int, int, int, str, float]]:
+        """Every text line RapidOCR finds on the whole page: (x1, y1, x2, y2, text, score).
+        Catches English lettering the bubble detector misses: captions, names, sound effects."""
+        result = self.engine(img_rgb, use_det=True, use_cls=False, use_rec=True)
+        if result.txts is None:
+            return []
+        lines = []
+        for box, txt, score in zip(result.boxes, result.txts, result.scores):
+            x1, y1 = box[:, 0].min(), box[:, 1].min()
+            x2, y2 = box[:, 0].max(), box[:, 1].max()
+            lines.append((int(x1), int(y1), int(x2), int(y2), txt.strip(), float(score)))
+        return lines
+
     def __call__(self, crop_rgb: np.ndarray) -> str:
         # Modes must be explicit: RapidOCR keeps the flags of the previous call (see read_line).
         # No orientation classifier: comic lettering is never upside down, but hand-drawn fonts fool it

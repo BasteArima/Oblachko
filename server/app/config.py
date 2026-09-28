@@ -28,6 +28,8 @@ class Settings:
     llm_reasoning_effort: str = "none"
     # "cuda" or "cpu" for the detector and OCR models
     device: str = "cuda"
+    # English pages: also OCR the whole page for text the bubble detector missed (~0.5 s per page)
+    page_ocr: bool = True
     models_dir: Path = SERVER_DIR / "models"
 
 
@@ -43,5 +45,8 @@ def load_settings() -> Settings:
     for f in fields(Settings):
         if f.name in overrides:
             default = getattr(settings, f.name)
-            setattr(settings, f.name, type(default)(overrides[f.name]))
+            value = overrides[f.name]
+            if isinstance(default, bool) and isinstance(value, str):
+                value = value.strip().lower() in ("1", "true", "yes", "on")  # bool("false") is True
+            setattr(settings, f.name, type(default)(value))
     return settings

@@ -12,3 +12,5 @@ llm_model = ""
 # llm_reasoning_effort = "none"
 
 # device = "cuda"
+# English pages: also search the whole page for text the bubble detector missed
+# page_ocr = true

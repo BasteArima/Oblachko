@@ -26,6 +26,8 @@ _WATERMARK_RE = re.compile(r"^[\w\-]+\.(com|net|org|se|to|zone|io|me|info|site|x
 _PUNCT_ONLY_RE = re.compile(r"^[\s!?！？.。．…‥・\-ー~〜～、,]+$")
 
 OCR_PAD = 6
+# Page-wide OCR lines below this recognition score are mostly logos and texture ("ODBV" on a T-shirt)
+PAGE_OCR_MIN_SCORE = 0.9
 
 
 @dataclass
@@ -121,6 +123,10 @@ class Pipeline:
         timings["ocr"] = time.perf_counter() - t
 
         page_lang = lang if lang != "auto" else self._dominant_lang(read)
+        if self.settings.page_ocr and page_lang == "en":
+            t = time.perf_counter()
+            read += self._page_lines(img_rgb, detected)
+            timings["page_ocr"] = time.perf_counter() - t
         order = reading_order([b for b, _, _ in read], rtl=page_lang == "ja")
 
         blocks: list[Block] = []
@@ -163,6 +169,47 @@ class Pipeline:
         if _latin_ratio(text) > 0.5:
             return "en", self.ocr_en()(crop)
         return "ja", text
+
+    def _page_lines(self, img_rgb: np.ndarray, detected: list[DetectedBlock]) -> list[tuple[DetectedBlock, str, str]]:
+        """English text the bubble detector missed (captions outside bubbles, names, sound effects):
+        OCR lines over the whole page that lie outside every detected block, merged into blocks.
+        English pages only: on Japanese pages the Chinese/English OCR model reads vertical text badly."""
+        lines = []
+        for x1, y1, x2, y2, text, score in self.ocr_en().page_lines(img_rgb):
+            if score < PAGE_OCR_MIN_SCORE or sum(c.isalpha() for c in text) < 2 or _latin_ratio(text) <= 0.5:
+                continue
+            if _WATERMARK_RE.match(text.replace(" ", "")):
+                continue
+            if any(min(x2, b.x2) > max(x1, b.x1) and min(y2, b.y2) > max(y1, b.y1) for b in detected):
+                continue  # already covered by a detected block
+            lines.append([x1, y1, x2, y2, text, score])
+
+        # Lines of one caption: stacked with a small gap and overlapping horizontally
+        groups: list[list[list]] = []
+        for line in sorted(lines, key=lambda ln: ln[1]):
+            for group in groups:
+                last = group[-1]
+                height = max(last[3] - last[1], line[3] - line[1])
+                if line[1] - last[3] < height * 0.8 and min(line[2], last[2]) > max(line[0], last[0]):
+                    group.append(line)
+                    break
+            else:
+                groups.append([line])
+
+        found = []
+        for group in groups:
+            text = ""
+            for *_, line_text, _ in group:
+                if text.endswith("-") or line_text.startswith("-"):
+                    text += line_text  # "IWATO" + "-SAN!", "WHAT-" + "EVER"
+                else:
+                    text = f"{text} {line_text}" if text else line_text
+            if _PUNCT_ONLY_RE.match(text):
+                continue
+            x1, y1 = min(ln[0] for ln in group), min(ln[1] for ln in group)
+            x2, y2 = max(ln[2] for ln in group), max(ln[3] for ln in group)
+            found.append((DetectedBlock(x1, y1, x2, y2, min(ln[5] for ln in group), "en"), "en", text))
+        return found
 
     def _is_watermark(self, crop: np.ndarray, text: str, block_lang: str, b: DetectedBlock) -> bool:
         if _WATERMARK_RE.match(unicodedata.normalize("NFKC", text).replace(" ", "")):
