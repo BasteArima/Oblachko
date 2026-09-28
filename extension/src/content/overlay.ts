@@ -27,12 +27,21 @@ const STYLE = `
   /* No plate: the bubble area is larger than the cleaned text box and a rectangle would cover
      the bubble outline. A halo in the bubble colour keeps letters readable over leftover lines. */
   text-shadow: 0 0 2px var(--bg), 0 0 2px var(--bg), 0 0 3px var(--bg), 0 0 5px var(--bg);
-  font-family: 'Oblachko Comic', 'Comic Sans MS', 'Segoe Print', 'Trebuchet MS', sans-serif;
+  font-family: 'Oblachko Comic', 'Comic Sans MS', 'Trebuchet MS', sans-serif;
   font-weight: 700;
   line-height: 1.1;
   white-space: pre-line;
   overflow-wrap: break-word;
   hyphens: auto;
+}
+/* Sound effects keep the original art: no cover, just a small caption with a strong white
+   outline over the drawn letters, like scanlators' translation notes */
+.text.sfx {
+  color: #111;
+  font-style: italic;
+  text-shadow:
+    -2px -2px 0 #fff, 2px -2px 0 #fff, -2px 2px 0 #fff, 2px 2px 0 #fff,
+    0 -3px 0 #fff, 0 3px 0 #fff, -3px 0 0 #fff, 3px 0 0 #fff, 0 0 6px #fff;
 }
 .badge {
   position: absolute;
@@ -187,13 +196,17 @@ export class PageView {
     const texts: HTMLElement[] = [];
     for (const block of result.blocks) {
       const [tx, ty, tw, th] = block.text_bbox;
-      const cover = document.createElement('div');
-      cover.className = 'cover';
-      Object.assign(cover.style, { left: `${tx - 2}px`, top: `${ty - 2}px`, width: `${tw + 4}px`, height: `${th + 4}px`, background: block.bg });
+      if (!block.sfx) {
+        const cover = document.createElement('div');
+        cover.className = 'cover';
+        Object.assign(cover.style, { left: `${tx - 2}px`, top: `${ty - 2}px`, width: `${tw + 4}px`, height: `${th + 4}px`, background: block.bg });
+        covers.push(cover);
+      }
 
-      const [x, y, w, h] = block.bbox;
+      // A sound effect's caption sits in the middle of the drawn letters, which stay visible
+      const [x, y, w, h] = block.sfx ? block.text_bbox : block.bbox;
       const text = document.createElement('div');
-      text.className = 'text';
+      text.className = block.sfx ? 'text sfx' : 'text';
       text.lang = 'ru';
       text.textContent = block.dst; // LLM output: never innerHTML
       Object.assign(text.style, {
@@ -201,12 +214,11 @@ export class PageView {
         top: `${y + h / 2}px`,
         width: `${w}px`,
         minHeight: `${h}px`,
-        color: block.fg,
       });
+      if (!block.sfx) text.style.color = block.fg;
       text.style.setProperty('--bg', block.bg);
       text.dataset.w = String(w);
       text.dataset.h = String(h);
-      covers.push(cover);
       texts.push(text);
     }
     this.stage.append(...covers, ...texts);
@@ -263,12 +275,14 @@ export class PageView {
 let comicFont: Promise<void> | null = null;
 
 /**
- * Comic Relief (OFL, has Cyrillic) bundled with the extension. Loaded from bytes rather than a URL
+ * Balsamiq Sans Bold (OFL, has Cyrillic) bundled with the extension. Comic Relief looked closer to
+ * lettering but its "ю" is wider than its advance and runs into the next letter.
+ * Loaded from bytes rather than a URL
  * so the page's CSP font-src can't block it; document fonts are visible inside our shadow root.
  */
 function loadComicFont(): Promise<void> {
   comicFont ??= (async () => {
-    const resp = await fetch(chrome.runtime.getURL('fonts/ComicRelief-Bold.ttf'));
+    const resp = await fetch(chrome.runtime.getURL('fonts/BalsamiqSans-Bold.ttf'));
     const face = new FontFace('Oblachko Comic', await resp.arrayBuffer(), { weight: '700' });
     document.fonts.add(await face.load());
   })().catch((err: unknown) => console.warn('[Oblachko] comic font not loaded, using a system font', err));

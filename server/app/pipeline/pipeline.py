@@ -30,6 +30,10 @@ OCR_PAD = 6
 NEIGHBOUR_INSIDE = 0.6
 # Trimming a bubble area off a neighbour's text keeps at least this share of the block's own text box
 KEEP_OWN_TEXT = 0.6
+# Sound effects: at most this many letters, each on average larger than this share of the page
+# height (dialogue letters are ~2%, "BAM" on the test page ~12%)
+SFX_MAX_LETTERS = 12
+SFX_LETTER_SIZE = 0.06
 # Page-wide OCR lines below this recognition score are mostly logos and texture ("ODBV" on a T-shirt)
 PAGE_OCR_MIN_SCORE = 0.9
 
@@ -41,6 +45,7 @@ class Block:
     bbox: tuple[int, int, int, int]  # x, y, w, h of the area to draw the translation in (bubble inside)
     lang: str
     vertical: bool
+    sfx: bool  # sound effect outside bubbles: the extension captions it instead of covering it
     bg: str
     fg: str
     src: str
@@ -139,7 +144,11 @@ class Pipeline:
             bg, fg = estimate_colors(img_rgb, mask, b.x1, b.y1, b.x2, b.y2)
             area = find_bubble(img_rgb, mask, b.x1, b.y1, b.x2, b.y2, bg)
             vertical = block_lang == "ja" and b.h > b.w
-            blocks.append(Block(len(blocks), (b.x1, b.y1, b.w, b.h), area, block_lang, vertical, bg, fg, text, text))
+            # Sound effect: outside any bubble, few letters, each of them huge compared to dialogue
+            letters = sum(not c.isspace() for c in text)
+            in_bubble = area != (b.x1, b.y1, b.w, b.h)
+            sfx = not in_bubble and letters <= SFX_MAX_LETTERS and (b.w * b.h / max(letters, 1)) ** 0.5 > SFX_LETTER_SIZE * min(h, w * 1.45)
+            blocks.append(Block(len(blocks), (b.x1, b.y1, b.w, b.h), area, block_lang, vertical, sfx, bg, fg, text, text))
         _keep_areas_apart(blocks)
 
         t = time.perf_counter()
@@ -149,6 +158,10 @@ class Pipeline:
         for blk, dst in zip(blocks, result.texts):
             blk.dst = _sentence_case(dst) if dst.isupper() else dst
         timings["translate"] = time.perf_counter() - t
+        # Left as it was (a logo, a Latin name): drawing it again would only hide the artwork
+        blocks = [blk for blk in blocks if _norm_text(blk.dst) != _norm_text(blk.src)]
+        for i, blk in enumerate(blocks):
+            blk.id = i
 
         return {
             "width": w,
@@ -169,7 +182,14 @@ class Pipeline:
             text = self.ocr_en()(crop)
             if _latin_ratio(text) > 0.5:
                 return "en", text
-            return "ja", self.ocr_ja()(crop)
+            japanese = self.ocr_ja()(crop)
+            # manga-ocr reads Japanese into anything, e.g. a T-shirt print ("一時間"). Real Japanese
+            # leaves RapidOCR blank or reading some of the same kana/kanji; a print gives it Latin
+            # letters and nothing in common with manga-ocr
+            latin = sum(c.isascii() and c.isalpha() for c in text)
+            if latin >= 2 and not set(_JAPANESE_CHAR_RE.findall(text)) & set(_JAPANESE_CHAR_RE.findall(japanese)):
+                return "ja", ""
+            return "ja", japanese
         text = self.ocr_ja()(crop)
         if _latin_ratio(text) > 0.5:
             return "en", self.ocr_en()(crop)
@@ -302,6 +322,13 @@ _SENTENCE_START_RE = re.compile(r"(^|[.!?…]\s+|^[-—]\s*)(\w)")
 def _sentence_case(text: str) -> str:
     """Models echo English comic ALL CAPS into Russian even when told not to."""
     return _SENTENCE_START_RE.sub(lambda m: m.group(1) + m.group(2).upper(), text.lower())
+
+
+_JAPANESE_CHAR_RE = re.compile(r"[぀-ヿ一-鿿]")
+
+
+def _norm_text(text: str) -> str:
+    return re.sub(r"\W+", "", unicodedata.normalize("NFKC", text)).casefold()
 
 
 def _latin_ratio(text: str) -> float:

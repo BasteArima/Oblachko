@@ -5,7 +5,7 @@
 Needs the server (start.bat) and LM Studio running. Writes docs/demo-page.png (the source page)
 and docs/demo.png (before / after). The page is drawn here from scratch, so the README shows no
 third-party manga; the translation and box layout come from the real pipeline, drawn the way the
-extension draws them (Comic Relief, a halo in the bubble colour).
+extension draws them (Balsamiq Sans, a halo in the bubble colour, sound effects without a cover).
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parent.parent
 DOCS = ROOT / "docs"
 SERVER = "http://127.0.0.1:8765"
 JP_FONT = "C:/Windows/Fonts/YuGothB.ttc"
-COMIC_FONT = str(ROOT / "extension" / "public" / "fonts" / "ComicRelief-Bold.ttf")
+COMIC_FONT = str(ROOT / "extension" / "public" / "fonts" / "BalsamiqSans-Bold.ttf")
 
 W, H = 900, 1280
 S = 2  # supersampling for smooth lines
@@ -211,10 +211,13 @@ def draw_translation(page: Image.Image, result: dict) -> Image.Image:
     draw = ImageDraw.Draw(out)
     page_h = min(result["height"], result["width"] * 1.45)
     for block in result["blocks"]:
+        if block.get("sfx"):
+            continue  # sound effects keep the original art
         tx, ty, tw, th = block["text_bbox"]
         draw.rounded_rectangle((tx - 2, ty - 2, tx + tw + 2, ty + th + 2), radius=6, fill=block["bg"])
     for block in result["blocks"]:
-        x, y, w, h = block["bbox"]
+        sfx = block.get("sfx", False)
+        x, y, w, h = block["text_bbox"] if sfx else block["bbox"]
         min_size, max_size = round(page_h * 0.011), round(min(page_h * 0.031, w / 4.5))
         best = None
         for size in range(max(min_size, max_size), min_size - 1, -1):
@@ -227,7 +230,10 @@ def draw_translation(page: Image.Image, result: dict) -> Image.Image:
         top = y + (h - len(lines) * size * 1.1) / 2
         for i, line in enumerate(lines):
             lx = x + (w - draw.textlength(line, font=font)) / 2
-            draw.text((lx, top + i * size * 1.1), line, font=font, fill=block["fg"], stroke_width=max(2, size // 9), stroke_fill=block["bg"])
+            if sfx:
+                draw.text((lx, top + i * size * 1.1), line, font=font, fill="#111111", stroke_width=max(3, size // 7), stroke_fill="white")
+            else:
+                draw.text((lx, top + i * size * 1.1), line, font=font, fill=block["fg"], stroke_width=max(2, size // 9), stroke_fill=block["bg"])
     return out
 
 

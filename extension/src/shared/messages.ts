@@ -9,6 +9,8 @@ export interface Block {
   bbox: [number, number, number, number];
   lang: 'ja' | 'en';
   vertical: boolean;
+  /** Sound effect outside bubbles: drawn as a caption over the art, without a cover */
+  sfx: boolean;
   bg: string;
   fg: string;
   src: string;

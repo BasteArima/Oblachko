@@ -142,4 +142,4 @@ GitHub Actions соберёт расширение и выложит архив 
 - [comic-text-detector](https://github.com/dmMaze/comic-text-detector) и модель из [manga-image-translator](https://github.com/zyddnys/manga-image-translator): поиск текста
 - [manga-ocr](https://github.com/kha-white/manga-ocr): японский OCR
 - [RapidOCR](https://github.com/RapidAI/RapidOCR): английский OCR
-- [Comic Relief](https://github.com/loudifier/Comic-Relief): шрифт перевода (SIL Open Font License, `extension/public/fonts/OFL.txt`)
+- [Balsamiq Sans](https://github.com/balsamiq/balsamiqsans): шрифт перевода (SIL Open Font License, `extension/public/fonts/OFL.txt`)
