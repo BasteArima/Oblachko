@@ -12,8 +12,17 @@ class EnglishOcr:
         # CPU on purpose: small crops of varying size make the CUDA provider ~12x slower (2.4 s vs 0.2 s per bubble)
         self.engine = RapidOCR()
 
+    def read_line(self, crop_rgb: np.ndarray) -> str:
+        """Recognition only, for a crop that is a single line. Uses the brightest channel so coloured
+        text on a dark background (scanlator watermarks: red on black) doesn't vanish in greyscale;
+        the line detector misses such thin strips entirely."""
+        bright = crop_rgb.max(axis=2)
+        result = self.engine(np.dstack([bright, bright, bright]), use_det=False, use_cls=False, use_rec=True)
+        return result.txts[0] if result.txts else ""
+
     def __call__(self, crop_rgb: np.ndarray) -> str:
-        result = self.engine(crop_rgb)
+        # Modes must be explicit: RapidOCR keeps the flags of the previous call (see read_line)
+        result = self.engine(crop_rgb, use_det=True, use_cls=True, use_rec=True)
         if result.txts is None or len(result.txts) == 0:
             return ""
         # Top-to-bottom, then left-to-right

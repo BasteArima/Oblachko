@@ -8,6 +8,8 @@ __pycache__/
 server/models/
 server/cache/
 server/bench_out/
+server/config.toml
+*.log
 
 # Test pages are copyrighted, keep them local only
 test_pages/

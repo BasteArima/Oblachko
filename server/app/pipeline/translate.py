@@ -11,6 +11,9 @@ from dataclasses import dataclass, field
 
 import httpx
 
+# Bump when SYSTEM_PROMPT or the pipeline output changes: it is part of the cache key, so old translations get redone
+PROMPT_VERSION = 2
+
 SYSTEM_PROMPT = """\
 You are a professional manga translator working for a Russian scanlation team.
 Translate each line into natural, colloquial Russian, the way a good Russian scanlation would read.

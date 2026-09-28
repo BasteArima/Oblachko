@@ -43,7 +43,12 @@ class TextDetector:
         providers: list = ["CPUExecutionProvider"]
         if device == "cuda":
             # EXHAUSTIVE (default) benchmarks every conv algorithm on the first run: ~40 s stall
-            providers.insert(0, ("CUDAExecutionProvider", {"cudnn_conv_algo_search": "HEURISTIC"}))
+            cuda_options = {
+                "cudnn_conv_algo_search": "HEURISTIC",
+                # Default kNextPowerOfTwo grows the arena in doubling steps: wasted VRAM on 8 GB cards
+                "arena_extend_strategy": "kSameAsRequested",
+            }
+            providers.insert(0, ("CUDAExecutionProvider", cuda_options))
             # Use the CUDA / cuDNN DLLs shipped with the torch wheel instead of a system-wide CUDA install
             ort.preload_dlls()
         self.session = ort.InferenceSession(str(models_dir / MODEL_FILE), providers=providers)

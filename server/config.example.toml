@@ -1,0 +1,14 @@
+# Copy to config.toml and adjust. Every key is optional, see app/config.py for defaults.
+
+# host = "127.0.0.1"
+# port = 8765
+
+# LM Studio: Developer tab -> Start server. Default port is 1234, check the port it shows.
+llm_base_url = "http://localhost:1234/v1"
+# Empty = the first model loaded in LM Studio
+llm_model = ""
+# llm_temperature = 0.3
+# "none" turns off thinking for Qwen3.x / Gemma 4; empty = don't send the field
+# llm_reasoning_effort = "none"
+
+# device = "cuda"

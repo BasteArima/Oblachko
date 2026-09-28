@@ -96,8 +96,7 @@ class Pipeline:
             else:
                 block_lang, text = lang, (self.ocr_ja() if lang == "ja" else self.ocr_en())(crop)
             seen[block_lang] += 1
-            normalized = unicodedata.normalize("NFKC", text)
-            if not text or _WATERMARK_RE.match(normalized.replace(" ", "")):
+            if not text or self._is_watermark(crop, text, block_lang, b):
                 continue
             read.append((b, block_lang, text))
         timings["ocr"] = time.perf_counter() - t
@@ -148,6 +147,16 @@ class Pipeline:
         if _latin_ratio(text) > 0.5:
             return "en", self.ocr_en()(crop)
         return "ja", text
+
+    def _is_watermark(self, crop: np.ndarray, text: str, block_lang: str, b: DetectedBlock) -> bool:
+        if _WATERMARK_RE.match(unicodedata.normalize("NFKC", text).replace(" ", "")):
+            return True
+        # manga-ocr hallucinates Japanese from Latin domains ("RawLazy.Com" -> "「わかりません」と"),
+        # so single-line strips it read as Japanese get a second look with the English OCR
+        if block_lang == "ja" and b.w > 3 * b.h:
+            line = self.ocr_en().read_line(crop).replace(" ", "")
+            return bool(_WATERMARK_RE.match(line)) or (len(line) <= 20 and "raw" in line.lower())
+        return False
 
     @staticmethod
     def _dominant_lang(read: list[tuple[DetectedBlock, str, str]]) -> str:

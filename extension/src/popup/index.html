@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Oblachko</title>
+    <link rel="stylesheet" href="./popup.css" />
+  </head>
+  <body>
+    <header>
+      <img src="/icons/icon32.png" alt="" width="20" height="20" />
+      <h1>Oblachko</h1>
+      <span id="status-dot" class="dot" title="Статус сервера"></span>
+    </header>
+
+    <p id="status" class="status">Проверяю сервер…</p>
+
+    <section id="site-section">
+      <label class="toggle">
+        <input id="enabled" type="checkbox" />
+        <span>Переводить на <b id="host">этом сайте</b></span>
+      </label>
+
+      <label class="field">
+        <span>Язык оригинала</span>
+        <select id="lang">
+          <option value="auto">Определять сам</option>
+          <option value="ja">Японский</option>
+          <option value="en">Английский</option>
+        </select>
+      </label>
+
+      <p class="hint">Зажмите <kbd>Alt</kbd>, чтобы увидеть оригинал.</p>
+    </section>
+
+    <p id="unsupported" class="hint" hidden>На этой странице расширение не работает.</p>
+
+    <details>
+      <summary>Сервер</summary>
+      <form id="server-form" class="field">
+        <span>Адрес локального сервера</span>
+        <div class="row">
+          <input id="server-url" type="url" required spellcheck="false" />
+          <button type="submit">OK</button>
+        </div>
+      </form>
+    </details>
+
+    <script type="module" src="./popup.ts"></script>
+  </body>
+</html>
